@@ -97,6 +97,7 @@ db.exec(`
 
 // ─── Helpers ────────────────────────────────────────────────
 const uid = () => crypto.randomUUID();
+const wrap = fn => async (req, res, next) => { try { await fn(req, res, next); } catch(e) { console.error(e); res.status(500).json({ error: e.message || 'Erro interno do servidor' }); } };
 const MEMBER_COLORS = ['#3b82f6','#ec4899','#10b981','#f97316','#a855f7','#e54848','#eab308','#06b6d4'];
 const DEFAULT_CATS = [
   { name: 'Alimentação', limit: 800,  color: '#f97316' },
@@ -198,33 +199,33 @@ app.get('/api/auth/me', auth, (req, res) => {
 });
 
 // ─── MEMBERS ─────────────────────────────────────────────────
-app.get('/api/members', auth, (req, res) =>
+app.get('/api/members', auth, wrap(async (req, res) =>
   res.json(db.prepare('SELECT * FROM members WHERE household_id = ?').all(req.hid))
-);
+));
 
-app.post('/api/members', auth, (req, res) => {
+app.post('/api/members', auth, wrap(async (req, res) => {
   const { name, color } = req.body;
   if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório' });
   const id = uid();
   db.prepare('INSERT INTO members (id, household_id, name, color) VALUES (?, ?, ?, ?)').run(id, req.hid, name.trim(), color || '#3b82f6');
   res.json({ id, name: name.trim(), color: color || '#3b82f6', household_id: req.hid });
-});
+}));
 
-app.put('/api/members/:id', auth, (req, res) => {
+app.put('/api/members/:id', auth, wrap(async (req, res) => {
   const { name, color } = req.body;
   db.prepare('UPDATE members SET name=?, color=? WHERE id=? AND household_id=?').run(name?.trim(), color, req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/members/:id', auth, (req, res) => {
+app.delete('/api/members/:id', auth, wrap(async (req, res) => {
   db.prepare('UPDATE transactions SET member_id=NULL WHERE member_id=?').run(req.params.id);
   db.prepare('UPDATE bills SET member_id=NULL WHERE member_id=?').run(req.params.id);
   db.prepare('DELETE FROM members WHERE id=? AND household_id=?').run(req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
 // ─── TRANSACTIONS ─────────────────────────────────────────────
-app.get('/api/transactions', auth, (req, res) => {
+app.get('/api/transactions', auth, wrap(async (req, res) => {
   let q = 'SELECT * FROM transactions WHERE household_id = ?';
   const p = [req.hid];
   if (req.query.year && req.query.month) {
@@ -233,76 +234,76 @@ app.get('/api/transactions', auth, (req, res) => {
   }
   q += ' ORDER BY date DESC, created_at DESC';
   res.json(db.prepare(q).all(...p).map(mapTx));
-});
+}));
 
-app.post('/api/transactions', auth, (req, res) => {
+app.post('/api/transactions', auth, wrap(async (req, res) => {
   const { type, description, amount, category, date, isRecurring, isFixed, notes, memberId } = req.body;
   const id = uid();
   db.prepare('INSERT INTO transactions (id,household_id,created_by,type,description,amount,category,date,is_recurring,is_fixed,notes,member_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(id, req.hid, req.user.id, type, description, amount, category, date, isRecurring?1:0, isFixed?1:0, notes||'', memberId||null);
   res.json({ id });
-});
+}));
 
-app.put('/api/transactions/:id', auth, (req, res) => {
+app.put('/api/transactions/:id', auth, wrap(async (req, res) => {
   const { type, description, amount, category, date, isRecurring, isFixed, notes, memberId } = req.body;
   db.prepare('UPDATE transactions SET type=?,description=?,amount=?,category=?,date=?,is_recurring=?,is_fixed=?,notes=?,member_id=? WHERE id=? AND household_id=?')
     .run(type, description, amount, category, date, isRecurring?1:0, isFixed?1:0, notes||'', memberId||null, req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/transactions/:id', auth, (req, res) => {
+app.delete('/api/transactions/:id', auth, wrap(async (req, res) => {
   db.prepare('DELETE FROM transactions WHERE id=? AND household_id=?').run(req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
 // ─── CATEGORIES ──────────────────────────────────────────────
-app.get('/api/categories', auth, (req, res) =>
+app.get('/api/categories', auth, wrap(async (req, res) =>
   res.json(db.prepare('SELECT id, name, monthly_limit as "limit", color FROM categories WHERE household_id=?').all(req.hid))
-);
+));
 
-app.post('/api/categories', auth, (req, res) => {
+app.post('/api/categories', auth, wrap(async (req, res) => {
   const { name, limit, color } = req.body;
   const id = uid();
   db.prepare('INSERT INTO categories (id,household_id,name,monthly_limit,color) VALUES (?,?,?,?,?)').run(id, req.hid, name, limit||0, color||'#6b7280');
   res.json({ id });
-});
+}));
 
-app.put('/api/categories/:id', auth, (req, res) => {
+app.put('/api/categories/:id', auth, wrap(async (req, res) => {
   const { name, limit, color } = req.body;
   db.prepare('UPDATE categories SET name=?,monthly_limit=?,color=? WHERE id=? AND household_id=?').run(name, limit||0, color, req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/categories/:id', auth, (req, res) => {
+app.delete('/api/categories/:id', auth, wrap(async (req, res) => {
   db.prepare('DELETE FROM categories WHERE id=? AND household_id=?').run(req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
 // ─── GOALS ───────────────────────────────────────────────────
-app.get('/api/goals', auth, (req, res) =>
+app.get('/api/goals', auth, wrap(async (req, res) =>
   res.json(db.prepare('SELECT * FROM goals WHERE household_id=?').all(req.hid).map(mapGoal))
-);
+));
 
-app.post('/api/goals', auth, (req, res) => {
+app.post('/api/goals', auth, wrap(async (req, res) => {
   const { name, targetAmount, currentAmount, deadline, color } = req.body;
   const id = uid();
   db.prepare('INSERT INTO goals (id,household_id,name,target_amount,current_amount,deadline,color) VALUES (?,?,?,?,?,?,?)').run(id, req.hid, name, targetAmount, currentAmount||0, deadline||null, color||'#3b82f6');
   res.json({ id });
-});
+}));
 
-app.put('/api/goals/:id', auth, (req, res) => {
+app.put('/api/goals/:id', auth, wrap(async (req, res) => {
   const { name, targetAmount, currentAmount, deadline, color } = req.body;
   db.prepare('UPDATE goals SET name=?,target_amount=?,current_amount=?,deadline=?,color=? WHERE id=? AND household_id=?').run(name, targetAmount, currentAmount||0, deadline||null, color, req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/goals/:id', auth, (req, res) => {
+app.delete('/api/goals/:id', auth, wrap(async (req, res) => {
   db.prepare('DELETE FROM goals WHERE id=? AND household_id=?').run(req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
 // ─── BILLS ───────────────────────────────────────────────────
-app.get('/api/bills', auth, (req, res) => {
+app.get('/api/bills', auth, wrap(async (req, res) => {
   let q = 'SELECT * FROM bills WHERE household_id=?';
   const p = [req.hid];
   if (req.query.year && req.query.month) {
@@ -310,29 +311,29 @@ app.get('/api/bills', auth, (req, res) => {
     p.push(req.query.year.toString(), req.query.month.toString().padStart(2,'0'));
   }
   res.json(db.prepare(q).all(...p).map(mapBill));
-});
+}));
 
-app.post('/api/bills', auth, (req, res) => {
+app.post('/api/bills', auth, wrap(async (req, res) => {
   const { type, description, amount, dueDate, category, isRecurring, memberId } = req.body;
   const id = uid();
   db.prepare('INSERT INTO bills (id,household_id,type,description,amount,due_date,category,is_recurring,member_id) VALUES (?,?,?,?,?,?,?,?,?)').run(id, req.hid, type, description, amount, dueDate, category, isRecurring?1:0, memberId||null);
   res.json({ id });
-});
+}));
 
-app.put('/api/bills/:id', auth, (req, res) => {
+app.put('/api/bills/:id', auth, wrap(async (req, res) => {
   const { type, description, amount, dueDate, category, status, isRecurring, memberId } = req.body;
   db.prepare('UPDATE bills SET type=?,description=?,amount=?,due_date=?,category=?,status=?,is_recurring=?,member_id=? WHERE id=? AND household_id=?')
     .run(type, description, amount, dueDate, category, status||'pending', isRecurring?1:0, memberId||null, req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
-app.delete('/api/bills/:id', auth, (req, res) => {
+app.delete('/api/bills/:id', auth, wrap(async (req, res) => {
   db.prepare('DELETE FROM bills WHERE id=? AND household_id=?').run(req.params.id, req.hid);
   res.json({ ok: true });
-});
+}));
 
 // Mark bill done → create transaction + next recurrence
-app.post('/api/bills/:id/done', auth, (req, res) => {
+app.post('/api/bills/:id/done', auth, wrap(async (req, res) => {
   const bill = db.prepare('SELECT * FROM bills WHERE id=? AND household_id=?').get(req.params.id, req.hid);
   if (!bill) return res.status(404).json({ error: 'Não encontrado' });
 
@@ -352,7 +353,7 @@ app.post('/api/bills/:id/done', auth, (req, res) => {
     return txId;
   });
   res.json({ ok: true, txId: doIt() });
-});
+}));
 
 // ─── Start ────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
