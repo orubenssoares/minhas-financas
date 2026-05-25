@@ -148,6 +148,11 @@
   <div class="modal" id="modal-body"></div>
 </div>
 
+<!-- ═══════════════════ TOAST ═══════════════════ -->
+<div id="toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);z-index:999;transition:transform .3s;pointer-events:none">
+  <div id="toast-inner" style="padding:10px 20px;border-radius:10px;font-size:14px;font-weight:500;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)"></div>
+</div>
+
 <script>
 // ─── PDF.js worker ───────────────────────────────────────────
 try { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'; } catch(e){}
@@ -169,6 +174,39 @@ async function api(method, path, body) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.error || 'Erro na requisição');
   return data;
+}
+
+// ─── Toast ───────────────────────────────────────────────────
+let toastTimer;
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  const inner = document.getElementById('toast-inner');
+  const colors = { success: { bg:'#052e16', color:'#6ee7b7', border:'#10b981' }, error: { bg:'#450a0a', color:'#fca5a5', border:'#ef4444' }, info: { bg:'#0c1a2e', color:'#93c5fd', border:'#3b82f6' } };
+  const c = colors[type] || colors.info;
+  inner.style.cssText = `background:${c.bg};color:${c.color};border:1px solid ${c.border};padding:10px 20px;border-radius:10px;font-size:14px;font-weight:500;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)`;
+  inner.textContent = msg;
+  t.style.transform = 'translateX(-50%) translateY(0)';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.style.transform = 'translateX(-50%) translateY(80px)'; }, 3000);
+}
+
+function showModalError(msg) {
+  let el = document.getElementById('modal-err');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'modal-err';
+    el.style.cssText = 'background:#450a0a;color:#fca5a5;border-left:4px solid #ef4444;border-radius:8px;padding:10px 14px;font-size:13px;margin-top:8px';
+    const form = document.querySelector('#modal-body form');
+    if (form) form.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function setBtnLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) { btn.disabled = true; btn.dataset.orig = btn.textContent; btn.textContent = 'Salvando...'; }
+  else { btn.disabled = false; btn.textContent = btn.dataset.orig || 'Salvar'; }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -570,14 +608,20 @@ function renderBillList(bills, today_) {
 }
 
 async function markBillDone(id) {
-  await api('POST', `/api/bills/${id}/done`);
-  await loadAll(); render();
+  try {
+    await api('POST', `/api/bills/${id}/done`);
+    await loadAll(); render();
+    showToast('Marcado como pago!', 'success');
+  } catch(err) { showToast(err.message, 'error'); }
 }
 
 async function deleteBill(id) {
   if (!confirm('Excluir este item?')) return;
-  await api('DELETE', `/api/bills/${id}`);
-  await loadAll(); render();
+  try {
+    await api('DELETE', `/api/bills/${id}`);
+    await loadAll(); render();
+    showToast('Item excluído', 'info');
+  } catch(err) { showToast(err.message, 'error'); }
 }
 
 // ─── TRANSAÇÕES ───────────────────────────────────────────────
@@ -626,8 +670,11 @@ function renderTransacoes() {
 
 async function deleteTx(id) {
   if (!confirm('Excluir esta transação?')) return;
-  await api('DELETE', `/api/transactions/${id}`);
-  await loadAll(); render();
+  try {
+    await api('DELETE', `/api/transactions/${id}`);
+    await loadAll(); render();
+    showToast('Transação excluída', 'info');
+  } catch(err) { showToast(err.message, 'error'); }
 }
 
 // ─── FAMÍLIA ──────────────────────────────────────────────────
@@ -749,8 +796,11 @@ function renderFamilia() {
 
 async function deleteMember(id) {
   if (!confirm('Excluir integrante? As transações relacionadas serão desvinculadas.')) return;
-  await api('DELETE', `/api/members/${id}`);
-  await loadAll(); render();
+  try {
+    await api('DELETE', `/api/members/${id}`);
+    await loadAll(); render();
+    showToast('Integrante excluído', 'info');
+  } catch(err) { showToast(err.message, 'error'); }
 }
 
 // ─── METAS ────────────────────────────────────────────────────
@@ -792,8 +842,11 @@ function renderMetas() {
 
 async function deleteGoal(id) {
   if (!confirm('Excluir esta meta?')) return;
-  await api('DELETE', `/api/goals/${id}`);
-  await loadAll(); render();
+  try {
+    await api('DELETE', `/api/goals/${id}`);
+    await loadAll(); render();
+    showToast('Meta excluída', 'info');
+  } catch(err) { showToast(err.message, 'error'); }
 }
 
 // ─── CATEGORIAS ───────────────────────────────────────────────
@@ -838,8 +891,11 @@ function renderCategorias() {
 
 async function deleteCat(id) {
   if (!confirm('Excluir categoria?')) return;
-  await api('DELETE', `/api/categories/${id}`);
-  await loadAll(); render();
+  try {
+    await api('DELETE', `/api/categories/${id}`);
+    await loadAll(); render();
+    showToast('Categoria excluída', 'info');
+  } catch(err) { showToast(err.message, 'error'); }
 }
 
 // ─── MODAL HELPERS ────────────────────────────────────────────
@@ -887,31 +943,36 @@ function openTxModal(type, id) {
 
 async function saveTx(e, type, id) {
   e.preventDefault();
-  const amount = parseFloat(document.getElementById('tx-amt').value);
-  const category = document.getElementById('tx-cat').value;
-  if (type === 'expense' && category) {
-    const cat = state.categories.find(c=>c.name===category);
-    if (cat && cat.limit > 0) {
-      const txs = txInMonth(curYear, curMonth);
-      const existing = txs.filter(t=>t.type==='expense' && t.category===category && (!id || t.id!==id)).reduce((a,t)=>a+t.amount,0);
-      const newTotal = existing + amount;
-      if (newTotal > cat.limit) {
-        if (!confirm(`⚠️ Esta transação levará "${category}" para ${fmt(newTotal)}, excedendo o limite de ${fmt(cat.limit)} em ${fmt(newTotal-cat.limit)}.\n\nDeseja continuar mesmo assim?`)) return;
+  const btn = e.target.querySelector('[type=submit]');
+  setBtnLoading(btn, true);
+  try {
+    const amount = parseFloat(document.getElementById('tx-amt').value);
+    const category = document.getElementById('tx-cat').value;
+    if (type === 'expense' && category) {
+      const cat = state.categories.find(c=>c.name===category);
+      if (cat && cat.limit > 0) {
+        const txs = txInMonth(curYear, curMonth);
+        const existing = txs.filter(t=>t.type==='expense' && t.category===category && (!id || t.id!==id)).reduce((a,t)=>a+t.amount,0);
+        const newTotal = existing + amount;
+        if (newTotal > cat.limit) {
+          if (!confirm(`⚠️ Esta transação levará "${category}" para ${fmt(newTotal)}, excedendo o limite de ${fmt(cat.limit)} em ${fmt(newTotal-cat.limit)}.\n\nDeseja continuar mesmo assim?`)) { setBtnLoading(btn, false); return; }
+        }
       }
     }
-  }
-  const body = {
-    type, description: document.getElementById('tx-desc').value,
-    amount, category,
-    date: document.getElementById('tx-date').value,
-    isFixed: document.getElementById('tx-fixed').checked,
-    isRecurring: document.getElementById('tx-recur').checked,
-    notes: document.getElementById('tx-notes').value,
-    memberId: document.getElementById('tx-member').value || null,
-  };
-  if (id) await api('PUT', `/api/transactions/${id}`, body);
-  else await api('POST', '/api/transactions', body);
-  closeModal(); await loadAll(); render();
+    const body = {
+      type, description: document.getElementById('tx-desc').value,
+      amount, category,
+      date: document.getElementById('tx-date').value,
+      isFixed: document.getElementById('tx-fixed').checked,
+      isRecurring: document.getElementById('tx-recur').checked,
+      notes: document.getElementById('tx-notes').value,
+      memberId: document.getElementById('tx-member').value || null,
+    };
+    if (id) await api('PUT', `/api/transactions/${id}`, body);
+    else await api('POST', '/api/transactions', body);
+    closeModal(); await loadAll(); render();
+    showToast(id ? 'Transação atualizada' : 'Transação salva', 'success');
+  } catch(err) { setBtnLoading(btn, false); showModalError(err.message); }
 }
 
 // ─── BILL MODAL ───────────────────────────────────────────────
@@ -945,19 +1006,25 @@ function openBillModal(id) {
 
 async function saveBill(e, id) {
   e.preventDefault();
-  const body = {
-    type: document.getElementById('bill-type').value,
-    description: document.getElementById('bill-desc').value,
-    amount: parseFloat(document.getElementById('bill-amt').value),
-    dueDate: document.getElementById('bill-date').value,
-    category: document.getElementById('bill-cat').value,
-    isRecurring: document.getElementById('bill-recur').checked,
-    memberId: document.getElementById('bill-member').value || null,
-    status: 'pending',
-  };
-  if (id) await api('PUT', `/api/bills/${id}`, body);
-  else await api('POST', '/api/bills', body);
-  closeModal(); await loadAll(); render();
+  const btn = e.target.querySelector('[type=submit]');
+  setBtnLoading(btn, true);
+  try {
+    const existing = id ? state.bills.find(b=>b.id===id) : null;
+    const body = {
+      type: document.getElementById('bill-type').value,
+      description: document.getElementById('bill-desc').value,
+      amount: parseFloat(document.getElementById('bill-amt').value),
+      dueDate: document.getElementById('bill-date').value,
+      category: document.getElementById('bill-cat').value,
+      isRecurring: document.getElementById('bill-recur').checked,
+      memberId: document.getElementById('bill-member').value || null,
+      status: existing?.status || 'pending',
+    };
+    if (id) await api('PUT', `/api/bills/${id}`, body);
+    else await api('POST', '/api/bills', body);
+    closeModal(); await loadAll(); render();
+    showToast(id ? 'Item atualizado' : 'Item adicionado', 'success');
+  } catch(err) { setBtnLoading(btn, false); showModalError(err.message); }
 }
 
 // ─── GOAL MODAL ───────────────────────────────────────────────
@@ -986,10 +1053,15 @@ function openGoalModal(id) {
 
 async function saveGoal(e, id) {
   e.preventDefault();
-  const body = { name: document.getElementById('goal-name').value, targetAmount: parseFloat(document.getElementById('goal-target').value), currentAmount: parseFloat(document.getElementById('goal-current').value)||0, deadline: document.getElementById('goal-deadline').value||null, color: document.getElementById('goal-color').value };
-  if (id) await api('PUT', `/api/goals/${id}`, body);
-  else await api('POST', '/api/goals', body);
-  closeModal(); await loadAll(); render();
+  const btn = e.target.querySelector('[type=submit]');
+  setBtnLoading(btn, true);
+  try {
+    const body = { name: document.getElementById('goal-name').value, targetAmount: parseFloat(document.getElementById('goal-target').value), currentAmount: parseFloat(document.getElementById('goal-current').value)||0, deadline: document.getElementById('goal-deadline').value||null, color: document.getElementById('goal-color').value };
+    if (id) await api('PUT', `/api/goals/${id}`, body);
+    else await api('POST', '/api/goals', body);
+    closeModal(); await loadAll(); render();
+    showToast(id ? 'Meta atualizada' : 'Meta criada', 'success');
+  } catch(err) { setBtnLoading(btn, false); showModalError(err.message); }
 }
 
 function openGoalAddModal(id) {
@@ -1010,10 +1082,15 @@ function openGoalAddModal(id) {
 
 async function addGoalValue(e, id) {
   e.preventDefault();
-  const g = state.goals.find(g=>g.id===id);
-  const add = parseFloat(document.getElementById('goal-add-val').value);
-  await api('PUT', `/api/goals/${id}`, { ...g, targetAmount: g.targetAmount, currentAmount: g.currentAmount + add });
-  closeModal(); await loadAll(); render();
+  const btn = e.target.querySelector('[type=submit]');
+  setBtnLoading(btn, true);
+  try {
+    const g = state.goals.find(g=>g.id===id);
+    const add = parseFloat(document.getElementById('goal-add-val').value);
+    await api('PUT', `/api/goals/${id}`, { ...g, targetAmount: g.targetAmount, currentAmount: g.currentAmount + add });
+    closeModal(); await loadAll(); render();
+    showToast('Valor adicionado à meta!', 'success');
+  } catch(err) { setBtnLoading(btn, false); showModalError(err.message); }
 }
 
 // ─── CATEGORY MODAL ───────────────────────────────────────────
@@ -1038,10 +1115,15 @@ function openCatModal(id) {
 
 async function saveCat(e, id) {
   e.preventDefault();
-  const body = { name: document.getElementById('cat-name').value, limit: parseFloat(document.getElementById('cat-limit').value)||0, color: document.getElementById('cat-color').value };
-  if (id) await api('PUT', `/api/categories/${id}`, body);
-  else await api('POST', '/api/categories', body);
-  closeModal(); await loadAll(); render();
+  const btn = e.target.querySelector('[type=submit]');
+  setBtnLoading(btn, true);
+  try {
+    const body = { name: document.getElementById('cat-name').value, limit: parseFloat(document.getElementById('cat-limit').value)||0, color: document.getElementById('cat-color').value };
+    if (id) await api('PUT', `/api/categories/${id}`, body);
+    else await api('POST', '/api/categories', body);
+    closeModal(); await loadAll(); render();
+    showToast(id ? 'Categoria atualizada' : 'Categoria criada', 'success');
+  } catch(err) { setBtnLoading(btn, false); showModalError(err.message); }
 }
 
 // ─── MEMBER MODAL ─────────────────────────────────────────────
@@ -1063,10 +1145,15 @@ function openMemberModal(id) {
 
 async function saveMember(e, id) {
   e.preventDefault();
-  const body = { name: document.getElementById('mem-name').value, color: document.getElementById('mem-color').value };
-  if (id) await api('PUT', `/api/members/${id}`, body);
-  else await api('POST', '/api/members', body);
-  closeModal(); await loadAll(); render();
+  const btn = e.target.querySelector('[type=submit]');
+  setBtnLoading(btn, true);
+  try {
+    const body = { name: document.getElementById('mem-name').value, color: document.getElementById('mem-color').value };
+    if (id) await api('PUT', `/api/members/${id}`, body);
+    else await api('POST', '/api/members', body);
+    closeModal(); await loadAll(); render();
+    showToast(id ? 'Integrante atualizado' : 'Integrante adicionado', 'success');
+  } catch(err) { setBtnLoading(btn, false); showModalError(err.message); }
 }
 
 // ─── IMPORT MODAL ─────────────────────────────────────────────
@@ -1200,10 +1287,16 @@ function showImportPreview() {
 
 async function confirmImport() {
   const toImport = pendingImports.filter(t=>t.selected);
-  for (const t of toImport) {
-    await api('POST', '/api/transactions', { type:'expense', description:t.description, amount:t.amount, category:t.category, date:t.date, isFixed:false, isRecurring:false, notes:'Importado' });
-  }
-  closeModal(); await loadAll(); render();
+  if (!toImport.length) { showToast('Nenhuma transação selecionada', 'error'); return; }
+  const btn = document.querySelector('#import-actions button:last-child');
+  setBtnLoading(btn, true);
+  try {
+    for (const t of toImport) {
+      await api('POST', '/api/transactions', { type:'expense', description:t.description, amount:t.amount, category:t.category, date:t.date, isFixed:false, isRecurring:false, notes:'Importado' });
+    }
+    closeModal(); await loadAll(); render();
+    showToast(`${toImport.length} transações importadas!`, 'success');
+  } catch(err) { setBtnLoading(btn, false); showToast(err.message, 'error'); }
 }
 
 // ─── INIT ─────────────────────────────────────────────────────
