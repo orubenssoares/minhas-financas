@@ -118,7 +118,7 @@ const mapBill= b => ({ ...b, dueDate: b.due_date, isRecurring: !!b.is_recurring,
 function auth(req, res, next) {
   const token = req.headers.authorization?.replace('Bearer ', '').trim();
   if (!token) return res.status(401).json({ error: 'Não autenticado' });
-  const session = db.prepare('SELECT * FROM sessions WHERE token = ? AND expires_at > datetime("now")').get(token);
+  const session = db.prepare(`SELECT * FROM sessions WHERE token = ? AND expires_at > datetime('now')`).get(token);
   if (!session) return res.status(401).json({ error: 'Sessão expirada. Faça login novamente.' });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id);
   if (!user) return res.status(401).json({ error: 'Usuário não encontrado' });
