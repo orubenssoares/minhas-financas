@@ -162,7 +162,8 @@ try { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/aja
 // ─── State ───────────────────────────────────────────────────
 let TOKEN = localStorage.getItem('fin_token') || '';
 let ME = null;
-let state = { transactions:[], categories:[], goals:[], bills:[], members:[], recurringBills:[] };
+let state = { transactions:[], categories:[], goals:[], bills:[], members:[], recurringBills:[], allBills:[] };
+let futureFilter = 'all';
 let projectedById = {};
 let curYear = new Date().getFullYear();
 let curMonth = new Date().getMonth() + 1;
@@ -752,20 +753,77 @@ function renderAgenda() {
         ${renderBillList(toRecv, today_)}
       </div>
     </div>
+    <div class="card p-4 mb-4">
+      <div id="agenda-future"><p class="text-slate-400 text-sm">Carregando...</p></div>
+    </div>
     <div class="card p-4">
       <h3 class="font-semibold text-white mb-3">📜 Histórico por mês</h3>
       <div id="agenda-history"><p class="text-slate-400 text-sm">Carregando...</p></div>
     </div>
   `;
-  renderAgendaHistory();
+  loadAllBillsCache().then(() => { renderFutureList(); renderAgendaHistory(); });
 }
 
-async function renderAgendaHistory() {
+async function loadAllBillsCache() {
+  try { state.allBills = await api('GET', '/api/bills'); }
+  catch (e) { state.allBills = []; }
+}
+
+function futureHeader() {
+  return `<div class="flex items-center justify-between mb-3">
+    <h3 class="font-semibold text-white">📋 Todos os lançamentos futuros</h3>
+    <div class="flex gap-1">
+      ${['all','bill','receivable'].map(f => `<button onclick="futureFilter='${f}';renderFutureList()" class="text-xs px-2 py-1 rounded-lg border ${futureFilter===f?'bg-blue-600 border-blue-600 text-white':'border-slate-700 text-slate-400 hover:border-slate-500'}">${f==='all'?'Todos':f==='bill'?'A pagar':'A receber'}</button>`).join('')}
+    </div>
+  </div>`;
+}
+
+function renderFutureList() {
+  const box = document.getElementById('agenda-future');
+  if (!box) return;
+  const today_ = today();
+  let items = state.allBills.filter(b => b.status === 'pending');
+  if (futureFilter !== 'all') items = items.filter(b => b.type === futureFilter);
+  items = [...items].sort((a,b) => a.dueDate.localeCompare(b.dueDate));
+
+  if (!items.length) { box.innerHTML = futureHeader() + '<p class="text-slate-400 text-sm text-center py-4">Nenhum lançamento pendente</p>'; return; }
+
+  box.innerHTML = futureHeader() + `<div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-xs text-slate-400 border-b border-slate-700">
+          <th class="text-left py-2 pr-4">Vencimento</th>
+          <th class="text-left py-2 px-3">Descrição</th>
+          <th class="text-left py-2 px-3">Categoria</th>
+          <th class="text-right py-2 px-3">Valor</th>
+          <th class="text-right py-2 pl-3"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(b => {
+          const overdue = b.dueDate < today_;
+          return `<tr class="border-b border-slate-700/30 hover:bg-slate-800/30">
+            <td class="py-2 pr-4 ${overdue?'text-red-400':'text-slate-300'}">${fmtDate(b.dueDate)} <span class="text-xs ${overdue?'text-red-400':'text-slate-500'}">· ${dueLabel(b.dueDate)}</span></td>
+            <td class="py-2 px-3 text-slate-200">${escH(b.description)}${b.isRecurring?' 🔁':''}${b.type==='receivable'?' <span class=\"text-xs text-emerald-400\">(a receber)</span>':''}</td>
+            <td class="py-2 px-3 text-slate-400">${escH(b.category)}</td>
+            <td class="text-right px-3 font-semibold ${b.type==='bill'?'text-red-400':'text-emerald-400'}">${fmt(b.amount)}</td>
+            <td class="text-right pl-3 whitespace-nowrap">
+              <button onclick="markBillDone('${b.id}')" class="btn btn-success text-xs px-2 py-1">✓</button>
+              <button onclick="openBillModal('${b.id}')" class="text-xs text-slate-500 hover:text-blue-400 px-1">✏</button>
+              <button onclick="deleteBill('${b.id}')" class="text-xs text-slate-500 hover:text-red-400 px-1">✕</button>
+            </td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderAgendaHistory() {
   const box = document.getElementById('agenda-history');
   if (!box) return;
-  let all;
-  try { all = await api('GET', '/api/bills'); }
-  catch (e) { box.innerHTML = '<p class="text-slate-400 text-sm">Não foi possível carregar o histórico.</p>'; return; }
+  const all = state.allBills;
+  if (!all.length) { box.innerHTML = '<p class="text-slate-400 text-sm text-center py-4">Nenhum registro ainda</p>'; return; }
 
   const byMonth = {};
   all.forEach(b => {
@@ -1321,7 +1379,7 @@ async function saveTx(e, type, id) {
 
 // ─── BILL MODAL ───────────────────────────────────────────────
 function openBillModal(id) {
-  const bill = id ? state.bills.find(b=>b.id===id) : null;
+  const bill = id ? (state.bills.find(b=>b.id===id) || state.allBills.find(b=>b.id===id)) : null;
   const b = bill || { type:'bill', description:'', amount:'', dueDate:today(), category:'', isRecurring:false, memberId:'' };
   openModal(`
     <h3 class="font-bold text-white text-lg mb-4">${bill?'Editar':'Novo'} item da agenda</h3>
