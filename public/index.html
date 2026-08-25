@@ -126,6 +126,7 @@
   <div class="px-4 py-2 flex gap-1 overflow-x-auto border-b border-slate-700/50 bg-slate-900/30">
     <button onclick="setTab('dashboard')" id="tab-dashboard" class="tab-btn active whitespace-nowrap">📊 Dashboard</button>
     <button onclick="setTab('agenda')"    id="tab-agenda"    class="tab-btn whitespace-nowrap">📅 Agenda</button>
+    <button onclick="setTab('fixosvar')"  id="tab-fixosvar"  class="tab-btn whitespace-nowrap">📌 Fixos x Variáveis</button>
     <button onclick="setTab('transacoes')" id="tab-transacoes" class="tab-btn whitespace-nowrap">💳 Transações</button>
     <button onclick="setTab('familia')"   id="tab-familia"   class="tab-btn whitespace-nowrap">👥 Família</button>
     <button onclick="setTab('metas')"     id="tab-metas"     class="tab-btn whitespace-nowrap">🎯 Metas</button>
@@ -136,6 +137,7 @@
   <main class="p-4 max-w-6xl mx-auto">
     <div id="view-dashboard"></div>
     <div id="view-agenda"    class="hidden"></div>
+    <div id="view-fixosvar"  class="hidden"></div>
     <div id="view-transacoes" class="hidden"></div>
     <div id="view-familia"   class="hidden"></div>
     <div id="view-metas"     class="hidden"></div>
@@ -348,7 +350,7 @@ function goToday() {
 // ─── TABS ─────────────────────────────────────────────────────
 function setTab(tab) {
   activeTab = tab;
-  ['dashboard','agenda','transacoes','familia','metas','categorias'].forEach(t => {
+  ['dashboard','agenda','fixosvar','transacoes','familia','metas','categorias'].forEach(t => {
     document.getElementById('view-'+t).classList.toggle('hidden', t !== tab);
     document.getElementById('tab-'+t).classList.toggle('active', t === tab);
   });
@@ -361,6 +363,7 @@ function renderTab(tab) {
   destroyCharts();
   if (tab === 'dashboard')   renderDashboard();
   else if (tab === 'agenda') renderAgenda();
+  else if (tab === 'fixosvar') renderFixosVariaveis();
   else if (tab === 'transacoes') renderTransacoes();
   else if (tab === 'familia')    renderFamilia();
   else if (tab === 'metas')      renderMetas();
@@ -765,6 +768,91 @@ async function deleteBill(id) {
     await loadAll(); render();
     showToast('Item excluído', 'info');
   } catch(err) { showToast(err.message, 'error'); }
+}
+
+// ─── FIXOS x VARIÁVEIS ──────────────────────────────────────────
+// Combines what already happened (transactions, flagged fixo/variável) with what's
+// still scheduled (Agenda bills — recurring ones count as fixo, one-off as variável),
+// so both columns show every cost for the month with its payment date.
+function fixedVariableSplit(year, month) {
+  const expenseTxs = txInMonth(year, month).filter(t => t.type === 'expense');
+  const toItem = (source, status) => x => ({
+    date: source === 'tx' ? x.date : x.dueDate,
+    description: x.description,
+    category: x.category,
+    amount: x.amount,
+    status,
+    memberId: x.memberId,
+  });
+
+  const pendingBills = state.bills.filter(b => b.type === 'bill' && b.status === 'pending');
+
+  const fixed = [
+    ...expenseTxs.filter(t => t.isFixed).map(toItem('tx', 'pago')),
+    ...pendingBills.filter(b => b.isRecurring).map(toItem('bill', 'pendente')),
+  ].sort((a,b) => a.date.localeCompare(b.date));
+
+  const variable = [
+    ...expenseTxs.filter(t => !t.isFixed).map(toItem('tx', 'pago')),
+    ...pendingBills.filter(b => !b.isRecurring).map(toItem('bill', 'pendente')),
+  ].sort((a,b) => a.date.localeCompare(b.date));
+
+  return { fixed, variable };
+}
+
+function renderFixosVariaveis() {
+  const el = document.getElementById('view-fixosvar');
+  const { fixed, variable } = fixedVariableSplit(curYear, curMonth);
+  const totalFixed = fixed.reduce((a,x) => a+x.amount, 0);
+  const totalVariable = variable.reduce((a,x) => a+x.amount, 0);
+  const total = totalFixed + totalVariable;
+  const fixedPct = total > 0 ? (totalFixed/total*100) : 0;
+
+  el.innerHTML = `
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-bold text-white">Fixos x Variáveis — ${monthLabel(curYear, curMonth)}</h2>
+    </div>
+    <div class="grid grid-cols-3 gap-3 mb-2">
+      <div class="card p-3 text-center"><div class="text-xs text-slate-400">Custos fixos</div><div class="font-bold text-blue-400">${fmt(totalFixed)}</div></div>
+      <div class="card p-3 text-center"><div class="text-xs text-slate-400">Custos variáveis</div><div class="font-bold text-orange-400">${fmt(totalVariable)}</div></div>
+      <div class="card p-3 text-center"><div class="text-xs text-slate-400">Total</div><div class="font-bold text-slate-200">${fmt(total)}</div></div>
+    </div>
+    ${total > 0 ? `
+      <div class="progress-bar mb-4" style="height:8px">
+        <div class="progress-fill" style="width:${fixedPct}%;background:#3b82f6"></div>
+      </div>
+      <p class="text-xs text-slate-500 mb-4">${fixedPct.toFixed(0)}% fixo · ${(100-fixedPct).toFixed(0)}% variável</p>
+    ` : ''}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="card p-4">
+        <h3 class="font-semibold text-blue-400 mb-3">📌 Custos fixos</h3>
+        ${renderFixedVarList(fixed)}
+      </div>
+      <div class="card p-4">
+        <h3 class="font-semibold text-orange-400 mb-3">🔀 Custos variáveis</h3>
+        ${renderFixedVarList(variable)}
+      </div>
+    </div>
+  `;
+}
+
+function renderFixedVarList(items) {
+  if (!items.length) return '<p class="text-slate-400 text-sm text-center py-4">Nenhum item</p>';
+  const today_ = today();
+  return items.map(x => {
+    const member = x.memberId ? `<span class="ml-1" style="color:${memberColor(x.memberId)}">· ${escH(memberName(x.memberId)||'')}</span>` : '';
+    const isPending = x.status === 'pendente';
+    const overdue = isPending && x.date < today_;
+    const dateLabel = isPending ? `${fmtDate(x.date)} · ${dueLabel(x.date)}` : fmtDate(x.date);
+    return `<div class="flex items-center gap-2 py-2 border-b border-slate-700/30">
+      <div class="flex-1">
+        <div class="text-sm font-medium text-slate-200">${escH(x.description)}</div>
+        <div class="text-xs ${overdue?'text-red-400':'text-slate-400'}">${dateLabel} · ${escH(x.category)}${member}</div>
+      </div>
+      <div class="font-semibold text-sm text-slate-200">${fmt(x.amount)}</div>
+      <span class="text-xs px-2 py-0.5 rounded-full ${isPending ? (overdue?'bg-red-500/20 text-red-400':'bg-amber-500/20 text-amber-400') : 'bg-emerald-500/20 text-emerald-400'}">${isPending ? (overdue?'vencido':'pendente') : 'pago'}</span>
+    </div>`;
+  }).join('');
 }
 
 // ─── TRANSAÇÕES ───────────────────────────────────────────────
