@@ -216,6 +216,14 @@ const escH = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').
 function parseDate(s) { if(!s) return null; const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
 function fmtDate(s) { const d = parseDate(s); if(!d) return ''; return d.toLocaleDateString('pt-BR'); }
 function today() { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; }
+function daysUntil(dateStr) { return Math.round((parseDate(dateStr) - parseDate(today())) / 86400000); }
+function dueLabel(dateStr) {
+  const d = daysUntil(dateStr);
+  if (d < 0) return `venceu há ${-d}d`;
+  if (d === 0) return 'vence hoje';
+  if (d === 1) return 'vence amanhã';
+  return `vence em ${d}d`;
+}
 function monthLabel(y, m) { return new Date(y, m-1, 1).toLocaleDateString('pt-BR', {month:'long', year:'numeric'}); }
 function catColor(name) { const c = state.categories.find(c=>c.name===name); return c?.color || '#6b7280'; }
 function catLimit(name) { const c = state.categories.find(c=>c.name===name); return c?.limit || 0; }
@@ -377,13 +385,14 @@ function renderDashboard() {
   const pendingBills = state.bills.filter(b=>b.status==='pending');
   const toPay = pendingBills.filter(b=>b.type==='bill').reduce((a,b)=>a+b.amount,0);
   const toReceive = pendingBills.filter(b=>b.type==='receivable').reduce((a,b)=>a+b.amount,0);
+  const projectedBalance = balance + toReceive - toPay;
 
   const insights = generateInsights(txs);
 
   const el = document.getElementById('view-dashboard');
   el.innerHTML = `
     <!-- KPI row -->
-    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-4">
       <div class="card p-4">
         <div class="text-xs text-slate-400 mb-1">Receitas</div>
         <div class="text-lg font-bold text-emerald-400">${fmt(income)}</div>
@@ -395,6 +404,10 @@ function renderDashboard() {
       <div class="card p-4">
         <div class="text-xs text-slate-400 mb-1">Saldo</div>
         <div class="text-lg font-bold ${balance>=0?'text-emerald-400':'text-red-400'}">${fmt(balance)}</div>
+      </div>
+      <div class="card p-4" title="Saldo atual + contas a receber pendentes − contas a pagar pendentes deste mês">
+        <div class="text-xs text-slate-400 mb-1">Saldo projetado</div>
+        <div class="text-lg font-bold ${projectedBalance>=0?'text-emerald-400':'text-red-400'}">${fmt(projectedBalance)}</div>
       </div>
       <div class="card p-4">
         <div class="text-xs text-slate-400 mb-1">Taxa de poupança</div>
@@ -459,25 +472,26 @@ function renderDashboard() {
 }
 
 function renderAgendaMini(pendingBills, toPay, toReceive) {
-  const bills = pendingBills.filter(b=>b.type==='bill').slice(0,4);
-  const recvs = pendingBills.filter(b=>b.type==='receivable').slice(0,3);
-  const today_ = today();
+  const sorted = [...pendingBills].sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  const next7 = sorted.filter(b => daysUntil(b.dueDate) <= 7).slice(0,6);
   let html = `<div class="flex gap-4 mb-3 text-sm">
     <span class="text-red-400 font-semibold">A pagar: ${fmt(toPay)}</span>
     <span class="text-emerald-400 font-semibold">A receber: ${fmt(toReceive)}</span>
   </div>`;
-  if (bills.length) html += bills.map(b => {
-    const overdue = b.dueDate < today_;
-    return `<div class="flex items-center justify-between py-1 text-sm border-b border-slate-700/50">
-      <span class="${overdue?'text-red-400':'text-slate-300'}">${escH(b.description)}</span>
-      <span class="text-slate-400">${fmtDate(b.dueDate)} · ${fmt(b.amount)}</span>
-    </div>`;
-  }).join('');
-  if (recvs.length) html += recvs.map(b => `<div class="flex items-center justify-between py-1 text-sm border-b border-slate-700/50">
-    <span class="text-emerald-300">${escH(b.description)}</span>
-    <span class="text-slate-400">${fmtDate(b.dueDate)} · ${fmt(b.amount)}</span>
-  </div>`).join('');
-  if (!bills.length && !recvs.length) html += '<p class="text-slate-400 text-sm">Nenhum pendente</p>';
+  if (next7.length) {
+    html += '<div class="text-xs text-slate-500 mb-1">Próximos 7 dias</div>';
+    html += next7.map(b => {
+      const d = daysUntil(b.dueDate);
+      const urgent = d <= 1;
+      const isBill = b.type === 'bill';
+      return `<div class="flex items-center justify-between py-1 text-sm border-b border-slate-700/50">
+        <span class="${isBill ? (urgent?'text-red-400':'text-slate-300') : 'text-emerald-300'}">${escH(b.description)}</span>
+        <span class="${urgent && isBill ? 'text-red-400 font-medium' : 'text-slate-400'}">${dueLabel(b.dueDate)} · ${fmt(b.amount)}</span>
+      </div>`;
+    }).join('');
+  } else {
+    html += '<p class="text-slate-400 text-sm">Nada nos próximos 7 dias</p>';
+  }
   return html;
 }
 
@@ -560,6 +574,15 @@ function generateInsights(txs) {
     return diff >= 0 && diff <= 5;
   });
   if (upcomingBills.length && isCurrentMonth) insights.push({ level:'info', text:`📆 ${upcomingBills.length} conta(s) vencem nos próximos 5 dias: ${upcomingBills.map(b=>b.description).join(', ')}` });
+
+  // Month-end balance projection (actual so far + pending bills still due this month)
+  if (isCurrentMonth) {
+    const pending = state.bills.filter(b=>b.status==='pending');
+    const pendingPay = pending.filter(b=>b.type==='bill').reduce((a,b)=>a+b.amount,0);
+    const pendingRecv = pending.filter(b=>b.type==='receivable').reduce((a,b)=>a+b.amount,0);
+    const projected = (totalIncome - totalExpense) + pendingRecv - pendingPay;
+    if (projected < 0) insights.push({ level:'error', text:`📉 Com as contas pendentes deste mês, o saldo projetado fecha negativo em ${fmt(-projected)}.` });
+  }
 
   return insights.slice(0, 7);
 }
@@ -889,6 +912,7 @@ function renderMetas() {
     </div>
     ${state.goals.length ? `<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
       ${state.goals.map(g => {
+        const achieved = g.targetAmount > 0 && g.currentAmount >= g.targetAmount;
         const pct = g.targetAmount > 0 ? Math.min((g.currentAmount/g.targetAmount)*100, 100) : 0;
         const remaining = g.targetAmount - g.currentAmount;
         return `<div class="card p-4">
@@ -907,7 +931,7 @@ function renderMetas() {
           <div class="progress-bar mb-1"><div class="progress-fill" style="width:${pct}%;background:${g.color}"></div></div>
           <div class="flex justify-between text-xs text-slate-400">
             <span>${pct.toFixed(1)}%</span>
-            <span>Faltam ${fmt(remaining)}</span>
+            <span>${achieved ? `🎉 Meta atingida · excedente ${fmt(-remaining)}` : `Faltam ${fmt(remaining)}`}</span>
           </div>
           <button onclick="openGoalAddModal('${g.id}')" class="btn btn-ghost w-full mt-3 text-xs py-1">+ Adicionar valor</button>
         </div>`;
