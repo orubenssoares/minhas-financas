@@ -3,3 +3,6 @@ financas.db
 financas.db-shm
 financas.db-wal
 .env
+
+# Local Netlify folder
+.netlify

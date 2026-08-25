@@ -160,7 +160,8 @@ try { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/aja
 // ─── State ───────────────────────────────────────────────────
 let TOKEN = localStorage.getItem('fin_token') || '';
 let ME = null;
-let state = { transactions:[], categories:[], goals:[], bills:[], members:[] };
+let state = { transactions:[], categories:[], goals:[], bills:[], members:[], recurringBills:[] };
+let projectedById = {};
 let curYear = new Date().getFullYear();
 let curMonth = new Date().getMonth() + 1;
 let activeTab = 'dashboard';
@@ -299,18 +300,20 @@ async function startApp() {
 
 async function loadAll() {
   const ys = curYear, ms = curMonth;
-  const [txs, cats, goals, bills, members] = await Promise.all([
+  const [txs, cats, goals, bills, members, recurringBills] = await Promise.all([
     api('GET', `/api/transactions?year=${ys}&month=${ms}`),
     api('GET', '/api/categories'),
     api('GET', '/api/goals'),
     api('GET', `/api/bills?year=${ys}&month=${ms}`),
     api('GET', '/api/members'),
+    api('GET', '/api/bills?recurring=1'),
   ]);
   state.transactions = txs;
   state.categories = cats;
   state.goals = goals;
   state.bills = bills;
   state.members = members;
+  state.recurringBills = recurringBills;
 }
 
 function updateMonthLabel() {
@@ -562,25 +565,88 @@ function generateInsights(txs) {
 }
 
 // ─── AGENDA ───────────────────────────────────────────────────
+function billSeriesKey(b) {
+  return [b.type, b.description, b.category, b.memberId||''].join('|');
+}
+
+// Shifts a YYYY-MM-DD date forward by n months, clamping the day to the target month's length.
+function addMonths(dateStr, n) {
+  const [y,m,d] = dateStr.split('-').map(Number);
+  const dt = new Date(y, m-1+n, 1);
+  const lastDay = new Date(dt.getFullYear(), dt.getMonth()+1, 0).getDate();
+  return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(Math.min(d,lastDay)).padStart(2,'0')}`;
+}
+
+// Projects recurring bills/receivables forward into months that have no real row yet,
+// so future months aren't just empty — the user sees what's expected to repeat.
+function projectedBillsFor(year, month) {
+  const targetKey = `${year}-${String(month).padStart(2,'0')}`;
+  const latestBySeries = {};
+  state.recurringBills.forEach(b => {
+    const key = billSeriesKey(b);
+    if (!latestBySeries[key] || b.dueDate > latestBySeries[key].dueDate) latestBySeries[key] = b;
+  });
+  const projected = [];
+  Object.values(latestBySeries).forEach(base => {
+    if (base.dueDate.slice(0,7) >= targetKey) return; // a real row already exists at/after this month
+    let cursorDate = base.dueDate;
+    while (cursorDate.slice(0,7) < targetKey) cursorDate = addMonths(cursorDate, 1);
+    const id = `proj-${billSeriesKey(base)}-${targetKey}`;
+    const p = { ...base, id, dueDate: cursorDate, status: 'projected', _projected: true };
+    projectedById[id] = p;
+    projected.push(p);
+  });
+  return projected;
+}
+
+async function confirmProjectedBill(id) {
+  const b = projectedById[id];
+  if (!b) return;
+  try {
+    await api('POST', '/api/bills', { type: b.type, description: b.description, amount: b.amount, dueDate: b.dueDate, category: b.category, isRecurring: true, memberId: b.memberId });
+    await loadAll(); render();
+    showToast('Item confirmado na agenda', 'success');
+  } catch(err) { showToast(err.message, 'error'); }
+}
+
 function renderAgenda() {
   const el = document.getElementById('view-agenda');
   const today_ = today();
-  const bills = state.bills.sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
+  const projected = projectedBillsFor(curYear, curMonth);
+  const bills = [...state.bills, ...projected].sort((a,b)=>a.dueDate.localeCompare(b.dueDate));
   const toPay = bills.filter(b=>b.type==='bill');
   const toRecv = bills.filter(b=>b.type==='receivable');
+  const totalPay = toPay.reduce((a,b)=>a+b.amount,0);
+  const totalRecv = toRecv.reduce((a,b)=>a+b.amount,0);
+  const saldo = totalRecv - totalPay;
+
+  const n = new Date();
+  const isPast = curYear < n.getFullYear() || (curYear === n.getFullYear() && curMonth < n.getMonth()+1);
+  const isFuture = curYear > n.getFullYear() || (curYear === n.getFullYear() && curMonth > n.getMonth()+1);
+  const periodBadge = isPast
+    ? '<span class="text-xs font-normal text-slate-400 ml-2">· mês passado</span>'
+    : isFuture
+      ? '<span class="text-xs font-normal text-amber-400 ml-2">· projeção</span>'
+      : '<span class="text-xs font-normal text-blue-400 ml-2">· mês atual</span>';
 
   el.innerHTML = `
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold text-white">Agenda do mês</h2>
+      <h2 class="text-lg font-bold text-white">Agenda${periodBadge}</h2>
       <button onclick="openBillModal()" class="btn btn-primary text-sm">+ Adicionar</button>
     </div>
+    <div class="grid grid-cols-3 gap-3 mb-4">
+      <div class="card p-3 text-center"><div class="text-xs text-slate-400">Saídas (a pagar)</div><div class="font-bold text-red-400">${fmt(totalPay)}</div></div>
+      <div class="card p-3 text-center"><div class="text-xs text-slate-400">Entradas (a receber)</div><div class="font-bold text-emerald-400">${fmt(totalRecv)}</div></div>
+      <div class="card p-3 text-center"><div class="text-xs text-slate-400">Saldo previsto</div><div class="font-bold ${saldo>=0?'text-emerald-400':'text-red-400'}">${fmt(saldo)}</div></div>
+    </div>
+    ${isFuture ? '<p class="text-xs text-amber-400/80 mb-3">🔮 itens marcados como projeção vêm de contas recorrentes e ainda não foram confirmados para este mês — clique em "Confirmar" para lançá-los de fato.</p>' : ''}
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div class="card p-4">
-        <h3 class="font-semibold text-red-400 mb-3">💳 Contas a pagar</h3>
+        <h3 class="font-semibold text-red-400 mb-3">💳 Saídas — Contas a pagar</h3>
         ${renderBillList(toPay, today_)}
       </div>
       <div class="card p-4">
-        <h3 class="font-semibold text-emerald-400 mb-3">💰 A receber</h3>
+        <h3 class="font-semibold text-emerald-400 mb-3">💰 Entradas — A receber</h3>
         ${renderBillList(toRecv, today_)}
       </div>
     </div>
@@ -590,10 +656,20 @@ function renderAgenda() {
 function renderBillList(bills, today_) {
   if (!bills.length) return '<p class="text-slate-400 text-sm text-center py-4">Nenhum item</p>';
   return bills.map(b => {
+    const member = b.memberId ? `<span class="ml-1" style="color:${memberColor(b.memberId)}">· ${escH(memberName(b.memberId)||'')}</span>` : '';
+    if (b._projected) {
+      return `<div class="flex items-center gap-2 py-2 border-b border-slate-700/30 opacity-70">
+        <div class="flex-1">
+          <div class="text-sm font-medium text-slate-300">${escH(b.description)} 🔮</div>
+          <div class="text-xs text-amber-400/80">${fmtDate(b.dueDate)} · ${escH(b.category)}${member} · projetado</div>
+        </div>
+        <div class="font-semibold text-sm ${b.type==='bill'?'text-red-400':'text-emerald-400'}">${fmt(b.amount)}</div>
+        <button onclick="confirmProjectedBill('${b.id}')" class="btn btn-ghost text-xs px-2 py-1">Confirmar</button>
+      </div>`;
+    }
     const isPending = b.status === 'pending';
     const overdue = isPending && b.dueDate < today_;
     const dateCss = overdue ? 'text-red-400' : 'text-slate-400';
-    const member = b.memberId ? `<span class="ml-1" style="color:${memberColor(b.memberId)}">· ${escH(memberName(b.memberId)||'')}</span>` : '';
     return `<div class="flex items-center gap-2 py-2 border-b border-slate-700/30">
       <div class="flex-1">
         <div class="text-sm font-medium ${isPending?'text-slate-200':'text-slate-500 line-through'}">${escH(b.description)}${b.isRecurring?' 🔁':''}</div>
