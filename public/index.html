@@ -347,6 +347,12 @@ function goToday() {
   loadAll().then(render);
 }
 
+function goToMonth(y, m) {
+  curYear = y; curMonth = m;
+  updateMonthLabel();
+  loadAll().then(render);
+}
+
 // ─── TABS ─────────────────────────────────────────────────────
 function setTab(tab) {
   activeTab = tab;
@@ -679,6 +685,28 @@ async function confirmProjectedBill(id) {
   } catch(err) { showToast(err.message, 'error'); }
 }
 
+// Month chips from 6 months ago through 2 months ahead (relative to today), for quick
+// jumping — clicking ‹ › one month at a time to check something from a while back is slow.
+function renderMonthStrip() {
+  const n = new Date();
+  const chips = [];
+  for (let i = -6; i <= 2; i++) {
+    const d = new Date(n.getFullYear(), n.getMonth()+i, 1);
+    chips.push({ y: d.getFullYear(), m: d.getMonth()+1 });
+  }
+  return `<div class="flex gap-2 overflow-x-auto mb-4 pb-1">
+    ${chips.map(c => {
+      const isToday = c.y === n.getFullYear() && c.m === n.getMonth()+1;
+      const isSelected = c.y === curYear && c.m === curMonth;
+      const label = new Date(c.y, c.m-1, 1).toLocaleDateString('pt-BR', {month:'short'}).replace('.','');
+      const showYear = c.y !== n.getFullYear();
+      return `<button onclick="goToMonth(${c.y},${c.m})" class="flex-shrink-0 px-3 py-1.5 rounded-lg text-xs font-medium border ${isSelected ? 'bg-blue-600 border-blue-600 text-white' : isToday ? 'border-blue-500 text-blue-400' : 'border-slate-700 text-slate-400 hover:border-slate-500'}">
+        ${label.charAt(0).toUpperCase()+label.slice(1)}${showYear ? '/'+String(c.y).slice(2) : ''}${isToday ? ' · hoje' : ''}
+      </button>`;
+    }).join('')}
+  </div>`;
+}
+
 function renderAgenda() {
   const el = document.getElementById('view-agenda');
   const today_ = today();
@@ -700,9 +728,13 @@ function renderAgenda() {
       : '<span class="text-xs font-normal text-blue-400 ml-2">· mês atual</span>';
 
   el.innerHTML = `
-    <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-bold text-white">Agenda${periodBadge}</h2>
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold text-white">Agenda</h2>
       <button onclick="openBillModal()" class="btn btn-primary text-sm">+ Adicionar</button>
+    </div>
+    ${renderMonthStrip()}
+    <div class="flex items-center mb-3">
+      <h3 class="text-sm font-semibold text-slate-300">${monthLabel(curYear,curMonth).replace(/^\w/, c=>c.toUpperCase())}${periodBadge}</h3>
     </div>
     <div class="grid grid-cols-3 gap-3 mb-4">
       <div class="card p-3 text-center"><div class="text-xs text-slate-400">Saídas (a pagar)</div><div class="font-bold text-red-400">${fmt(totalPay)}</div></div>
@@ -710,7 +742,7 @@ function renderAgenda() {
       <div class="card p-3 text-center"><div class="text-xs text-slate-400">Saldo previsto</div><div class="font-bold ${saldo>=0?'text-emerald-400':'text-red-400'}">${fmt(saldo)}</div></div>
     </div>
     ${isFuture ? '<p class="text-xs text-amber-400/80 mb-3">🔮 itens marcados como projeção vêm de contas recorrentes e ainda não foram confirmados para este mês — clique em "Confirmar" para lançá-los de fato.</p>' : ''}
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
       <div class="card p-4">
         <h3 class="font-semibold text-red-400 mb-3">💳 Saídas — Contas a pagar</h3>
         ${renderBillList(toPay, today_)}
@@ -720,7 +752,60 @@ function renderAgenda() {
         ${renderBillList(toRecv, today_)}
       </div>
     </div>
+    <div class="card p-4">
+      <h3 class="font-semibold text-white mb-3">📜 Histórico por mês</h3>
+      <div id="agenda-history"><p class="text-slate-400 text-sm">Carregando...</p></div>
+    </div>
   `;
+  renderAgendaHistory();
+}
+
+async function renderAgendaHistory() {
+  const box = document.getElementById('agenda-history');
+  if (!box) return;
+  let all;
+  try { all = await api('GET', '/api/bills'); }
+  catch (e) { box.innerHTML = '<p class="text-slate-400 text-sm">Não foi possível carregar o histórico.</p>'; return; }
+
+  const byMonth = {};
+  all.forEach(b => {
+    const key = b.dueDate.slice(0,7);
+    if (!byMonth[key]) byMonth[key] = { pay:0, recv:0, pending:false };
+    if (b.type === 'bill') byMonth[key].pay += b.amount; else byMonth[key].recv += b.amount;
+    if (b.status === 'pending') byMonth[key].pending = true;
+  });
+
+  const keys = Object.keys(byMonth).sort().reverse().slice(0, 24);
+  if (!keys.length) { box.innerHTML = '<p class="text-slate-400 text-sm text-center py-4">Nenhum registro ainda</p>'; return; }
+
+  box.innerHTML = `<div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-xs text-slate-400 border-b border-slate-700">
+          <th class="text-left py-2 pr-4">Mês</th>
+          <th class="text-right py-2 px-3">Saídas</th>
+          <th class="text-right py-2 px-3">Entradas</th>
+          <th class="text-right py-2 pl-3">Saldo</th>
+          <th class="text-left py-2 pl-4"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${keys.map(k => {
+          const [y,m] = k.split('-').map(Number);
+          const row = byMonth[k];
+          const saldo = row.recv - row.pay;
+          const isSelected = y === curYear && m === curMonth;
+          return `<tr onclick="goToMonth(${y},${m})" class="border-b border-slate-700/30 hover:bg-slate-800/40 cursor-pointer ${isSelected?'bg-slate-800/40':''}">
+            <td class="py-2 pr-4 text-slate-200">${monthLabel(y,m).replace(/^\w/, c=>c.toUpperCase())}</td>
+            <td class="text-right px-3 text-red-400">${fmt(row.pay)}</td>
+            <td class="text-right px-3 text-emerald-400">${fmt(row.recv)}</td>
+            <td class="text-right pl-3 font-semibold ${saldo>=0?'text-emerald-400':'text-red-400'}">${fmt(saldo)}</td>
+            <td class="text-left pl-4">${row.pending?'<span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">pendente</span>':''}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  </div>`;
 }
 
 function renderBillList(bills, today_) {
