@@ -444,6 +444,22 @@ function renderDashboard() {
       </div>
     </div>
 
+    <!-- Forecast -->
+    <div class="card p-4 mb-4">
+      <h3 class="font-semibold text-white mb-1">Previsão dos próximos meses</h3>
+      <p class="text-xs text-slate-500 mb-3">Baseado nas contas e receitas recorrentes já cadastradas na Agenda — não inclui lançamentos avulsos futuros.</p>
+      <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        ${recurringForecast(3).map(f => `
+          <div class="rounded-lg border border-slate-700/50 p-3">
+            <div class="text-xs text-slate-400 mb-2">${f.label.replace(/^\w/, c=>c.toUpperCase())}</div>
+            <div class="flex justify-between text-xs mb-1"><span class="text-red-400">Saídas</span><span class="text-red-400">${fmt(f.toPay)}</span></div>
+            <div class="flex justify-between text-xs mb-2"><span class="text-emerald-400">Entradas</span><span class="text-emerald-400">${fmt(f.toReceive)}</span></div>
+            <div class="flex justify-between text-sm font-semibold border-t border-slate-700/50 pt-2"><span class="text-slate-300">Saldo</span><span class="${f.saldo>=0?'text-emerald-400':'text-red-400'}">${fmt(f.saldo)}</span></div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
     <!-- Quick add -->
     <div class="card p-4">
       <div class="flex items-center justify-between mb-3">
@@ -598,6 +614,33 @@ function addMonths(dateStr, n) {
   const dt = new Date(y, m-1+n, 1);
   const lastDay = new Date(dt.getFullYear(), dt.getMonth()+1, 0).getDate();
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(Math.min(d,lastDay)).padStart(2,'0')}`;
+}
+
+// Rough month-by-month forecast (recurring items only, rolled forward from each
+// series' latest known occurrence) — used for the dashboard's "next months" outlook.
+function recurringForecast(n) {
+  const latestBySeries = {};
+  state.recurringBills.forEach(b => {
+    const key = billSeriesKey(b);
+    if (!latestBySeries[key] || b.dueDate > latestBySeries[key].dueDate) latestBySeries[key] = b;
+  });
+  const now = new Date();
+  const months = [];
+  for (let i = 0; i < n; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth()+i, 1);
+    const y = d.getFullYear(), m = d.getMonth()+1;
+    const targetKey = `${y}-${String(m).padStart(2,'0')}`;
+    let toPay = 0, toReceive = 0;
+    Object.values(latestBySeries).forEach(base => {
+      let cursor = base.dueDate;
+      while (cursor.slice(0,7) < targetKey) cursor = addMonths(cursor, 1);
+      if (cursor.slice(0,7) === targetKey) {
+        if (base.type === 'bill') toPay += base.amount; else toReceive += base.amount;
+      }
+    });
+    months.push({ y, m, toPay, toReceive, saldo: toReceive - toPay, label: monthLabel(y, m) });
+  }
+  return months;
 }
 
 // Projects recurring bills/receivables forward into months that have no real row yet,
