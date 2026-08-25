@@ -217,6 +217,7 @@ function parseDate(s) { if(!s) return null; const [y,m,d] = s.split('-').map(Num
 function fmtDate(s) { const d = parseDate(s); if(!d) return ''; return d.toLocaleDateString('pt-BR'); }
 function today() { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; }
 function daysUntil(dateStr) { return Math.round((parseDate(dateStr) - parseDate(today())) / 86400000); }
+function monthsUntil(dateStr) { return Math.max(1, Math.ceil(daysUntil(dateStr) / 30.44)); }
 function dueLabel(dateStr) {
   const d = daysUntil(dateStr);
   if (d < 0) return `venceu há ${-d}d`;
@@ -521,7 +522,7 @@ function renderCatLimits(byCategory) {
     const color = over ? '#ef4444' : pct > 80 ? '#f97316' : '#10b981';
     return `<div class="mb-3">
       <div class="flex justify-between text-xs mb-1">
-        <span style="color:${c.color}">${escH(c.name)}</span>
+        <span style="color:${c.color}">${over?'🔴 ':''}${escH(c.name)}</span>
         <span class="${over?'text-red-400':'text-slate-400'}">${fmt(spent)} / ${fmt(c.limit)}</span>
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${color}"></div></div>
@@ -976,6 +977,10 @@ function renderMetas() {
             <span>${pct.toFixed(1)}%</span>
             <span>${achieved ? `🎉 Meta atingida · excedente ${fmt(-remaining)}` : `Faltam ${fmt(remaining)}`}</span>
           </div>
+          ${!achieved && g.deadline ? (daysUntil(g.deadline) < 0
+            ? `<div class="text-xs text-red-400 mt-2">⚠️ Prazo vencido — ainda faltam ${fmt(remaining)}</div>`
+            : `<div class="text-xs text-amber-400/80 mt-2">📈 Precisa guardar ~${fmt(remaining/monthsUntil(g.deadline))}/mês para chegar no prazo</div>`
+          ) : ''}
           <button onclick="openGoalAddModal('${g.id}')" class="btn btn-ghost w-full mt-3 text-xs py-1">+ Adicionar valor</button>
         </div>`;
       }).join('')}
