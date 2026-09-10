@@ -35,6 +35,35 @@
   ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:#1e293b; } ::-webkit-scrollbar-thumb { background:#475569; border-radius:3px; }
   .avatar { width:32px; height:32px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:13px; font-weight:700; color:#fff; flex-shrink:0; }
   #auth-page { display:flex; } #app-page { display:none; }
+
+  /* ── App shell / sidebar ─────────────────────────────────── */
+  .app-shell { display:flex; min-height:100vh; }
+  .sidebar {
+    width:224px; flex-shrink:0; background:#0b1222; border-right:1px solid #1e293b;
+    display:flex; flex-direction:column; position:fixed; inset:0 auto 0 0; z-index:45;
+    transform:translateX(0); transition:transform .25s ease;
+  }
+  .sidebar-brand { padding:18px 16px; border-bottom:1px solid #1e293b; }
+  .sidebar-nav { flex:1; overflow-y:auto; padding:12px 10px; display:flex; flex-direction:column; gap:2px; }
+  .nav-btn {
+    display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px;
+    font-size:14px; font-weight:500; color:#94a3b8; cursor:pointer; transition:all .15s; text-align:left; width:100%; border:none; background:none;
+  }
+  .nav-btn .nav-icon { font-size:16px; width:20px; text-align:center; flex-shrink:0; }
+  .nav-btn:hover:not(.active) { background:#1e293b; color:#e2e8f0; }
+  .nav-btn.active { background:#3b82f6; color:#fff; }
+  .sidebar-foot { padding:12px 10px; border-top:1px solid #1e293b; }
+  .main-col { flex:1; min-width:0; margin-left:224px; display:flex; flex-direction:column; }
+  .mobile-topbar { display:none; }
+  .sidebar-overlay { display:none; }
+
+  @media (max-width: 767px) {
+    .sidebar { transform:translateX(-100%); box-shadow:0 0 40px rgba(0,0,0,.5); }
+    body.sidebar-open .sidebar { transform:translateX(0); }
+    .main-col { margin-left:0; }
+    .mobile-topbar { display:flex; }
+    body.sidebar-open .sidebar-overlay { display:block; position:fixed; inset:0; background:rgba(0,0,0,.5); z-index:44; }
+  }
 </style>
 </head>
 <body>
@@ -100,49 +129,68 @@
 
 <!-- ═══════════════════ APP PAGE ═══════════════════ -->
 <div id="app-page" class="min-h-screen">
-  <!-- Top bar -->
-  <header class="sticky top-0 z-40 bg-slate-900 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
-    <div class="flex items-center gap-3">
-      <span class="text-xl">💼</span>
-      <span class="font-bold text-white hidden sm:block">Minhas Finanças</span>
-      <span id="hh-name" class="text-xs text-slate-400 hidden sm:block"></span>
+  <div class="app-shell">
+    <div id="sidebar-overlay" class="sidebar-overlay" onclick="closeSidebar()"></div>
+
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">💼</span>
+          <span class="font-bold text-white">Minhas Finanças</span>
+        </div>
+        <div id="hh-name" class="text-xs text-slate-400 mt-1 truncate"></div>
+      </div>
+      <nav class="sidebar-nav">
+        <button onclick="setTab('dashboard')" id="tab-dashboard" class="nav-btn active"><span class="nav-icon">📊</span>Dashboard</button>
+        <button onclick="setTab('agenda')"    id="tab-agenda"    class="nav-btn"><span class="nav-icon">📅</span>Agenda</button>
+        <button onclick="setTab('fixosvar')"  id="tab-fixosvar"  class="nav-btn"><span class="nav-icon">📌</span>Fixos x Variáveis</button>
+        <button onclick="setTab('transacoes')" id="tab-transacoes" class="nav-btn"><span class="nav-icon">💳</span>Transações</button>
+        <button onclick="setTab('familia')"   id="tab-familia"   class="nav-btn"><span class="nav-icon">👥</span>Família</button>
+        <button onclick="setTab('metas')"     id="tab-metas"     class="nav-btn"><span class="nav-icon">🎯</span>Metas</button>
+        <button onclick="setTab('categorias')" id="tab-categorias" class="nav-btn"><span class="nav-icon">🏷️</span>Categorias</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="flex items-center gap-2 mb-3">
+          <div id="user-avatar" class="avatar" style="background:#3b82f6">U</div>
+          <span id="user-name" class="text-sm text-slate-300 truncate"></span>
+        </div>
+        <button onclick="doLogout()" class="btn btn-ghost text-xs w-full">Sair</button>
+      </div>
+    </aside>
+
+    <div class="main-col">
+      <div class="sticky top-0 z-30 bg-slate-900">
+        <!-- Mobile top bar -->
+        <header class="mobile-topbar border-b border-slate-700 px-4 py-3 items-center justify-between">
+          <button onclick="toggleSidebar()" class="btn btn-ghost px-3 py-1.5 text-sm" aria-label="Abrir menu">☰</button>
+          <span class="font-bold text-white text-sm">💼 Minhas Finanças</span>
+        </header>
+
+        <!-- Page header: title + month nav -->
+        <div class="bg-slate-900/95 backdrop-blur border-b border-slate-700/50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <h1 id="page-title" class="text-lg font-bold text-white">📊 Dashboard</h1>
+          <div class="flex items-center gap-2">
+            <button onclick="changeMonth(-1)" class="btn btn-ghost px-3 py-1 text-sm">‹</button>
+            <span id="month-label" class="font-semibold text-white min-w-32 text-center"></span>
+            <button onclick="changeMonth(1)" class="btn btn-ghost px-3 py-1 text-sm">›</button>
+            <button onclick="goToday()" class="btn btn-ghost px-2 py-1 text-xs text-slate-400">Hoje</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main content -->
+      <main class="p-4 max-w-6xl w-full mx-auto">
+        <div id="view-dashboard"></div>
+        <div id="view-agenda"    class="hidden"></div>
+        <div id="view-fixosvar"  class="hidden"></div>
+        <div id="view-transacoes" class="hidden"></div>
+        <div id="view-familia"   class="hidden"></div>
+        <div id="view-metas"     class="hidden"></div>
+        <div id="view-categorias" class="hidden"></div>
+      </main>
     </div>
-    <div class="flex items-center gap-3">
-      <div id="user-avatar" class="avatar" style="background:#3b82f6">U</div>
-      <span id="user-name" class="text-sm text-slate-300 hidden sm:block"></span>
-      <button onclick="doLogout()" class="btn btn-ghost text-xs px-3 py-1">Sair</button>
-    </div>
-  </header>
-
-  <!-- Month nav -->
-  <div class="px-4 py-3 flex items-center gap-3 bg-slate-900/50 border-b border-slate-700/50">
-    <button onclick="changeMonth(-1)" class="btn btn-ghost px-3 py-1 text-sm">‹</button>
-    <span id="month-label" class="font-semibold text-white min-w-32 text-center"></span>
-    <button onclick="changeMonth(1)" class="btn btn-ghost px-3 py-1 text-sm">›</button>
-    <button onclick="goToday()" class="btn btn-ghost px-2 py-1 text-xs text-slate-400">Hoje</button>
   </div>
-
-  <!-- Tabs -->
-  <div class="px-4 py-2 flex gap-1 overflow-x-auto border-b border-slate-700/50 bg-slate-900/30">
-    <button onclick="setTab('dashboard')" id="tab-dashboard" class="tab-btn active whitespace-nowrap">📊 Dashboard</button>
-    <button onclick="setTab('agenda')"    id="tab-agenda"    class="tab-btn whitespace-nowrap">📅 Agenda</button>
-    <button onclick="setTab('fixosvar')"  id="tab-fixosvar"  class="tab-btn whitespace-nowrap">📌 Fixos x Variáveis</button>
-    <button onclick="setTab('transacoes')" id="tab-transacoes" class="tab-btn whitespace-nowrap">💳 Transações</button>
-    <button onclick="setTab('familia')"   id="tab-familia"   class="tab-btn whitespace-nowrap">👥 Família</button>
-    <button onclick="setTab('metas')"     id="tab-metas"     class="tab-btn whitespace-nowrap">🎯 Metas</button>
-    <button onclick="setTab('categorias')" id="tab-categorias" class="tab-btn whitespace-nowrap">🏷️ Categorias</button>
-  </div>
-
-  <!-- Main content -->
-  <main class="p-4 max-w-6xl mx-auto">
-    <div id="view-dashboard"></div>
-    <div id="view-agenda"    class="hidden"></div>
-    <div id="view-fixosvar"  class="hidden"></div>
-    <div id="view-transacoes" class="hidden"></div>
-    <div id="view-familia"   class="hidden"></div>
-    <div id="view-metas"     class="hidden"></div>
-    <div id="view-categorias" class="hidden"></div>
-  </main>
 </div>
 
 <!-- ═══════════════════ MODAL ═══════════════════ -->
@@ -162,13 +210,21 @@ try { pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/aja
 // ─── State ───────────────────────────────────────────────────
 let TOKEN = localStorage.getItem('fin_token') || '';
 let ME = null;
-let state = { transactions:[], categories:[], goals:[], bills:[], members:[], recurringBills:[], allBills:[] };
+let state = { transactions:[], categories:[], goals:[], bills:[], members:[], recurringBills:[], allBills:[], currentMonthTx:[] };
 let futureFilter = 'all';
 let projectedById = {};
 let curYear = new Date().getFullYear();
 let curMonth = new Date().getMonth() + 1;
 let activeTab = 'dashboard';
 let charts = {};
+let dashInsights = [];
+
+function triggerInsight(idx) {
+  const action = dashInsights[idx]?.action;
+  if (!action) return;
+  if (action.tab === 'transacoes' && action.filter) txFilter = action.filter;
+  setTab(action.tab);
+}
 
 // ─── API ─────────────────────────────────────────────────────
 async function api(method, path, body) {
@@ -216,6 +272,8 @@ function setBtnLoading(btn, loading) {
 // ─── Helpers ─────────────────────────────────────────────────
 const fmt  = v => 'R$ ' + (+v||0).toLocaleString('pt-BR', {minimumFractionDigits:2, maximumFractionDigits:2});
 const escH = s => (s||'').toString().replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+// Escapes a value for safe use inside a single-quoted onclick="..." JS string literal.
+const escJs = s => escH(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
 function parseDate(s) { if(!s) return null; const [y,m,d] = s.split('-').map(Number); return new Date(y, m-1, d); }
 function fmtDate(s) { const d = parseDate(s); if(!d) return ''; return d.toLocaleDateString('pt-BR'); }
 function today() { const n = new Date(); return `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}`; }
@@ -312,13 +370,19 @@ async function startApp() {
 
 async function loadAll() {
   const ys = curYear, ms = curMonth;
-  const [txs, cats, goals, bills, members, recurringBills] = await Promise.all([
+  const n = new Date();
+  const rny = n.getFullYear(), rnm = n.getMonth() + 1;
+  const viewingRealMonth = ys === rny && ms === rnm;
+
+  const [txs, cats, goals, bills, members, recurringBills, allBills, currentMonthTx] = await Promise.all([
     api('GET', `/api/transactions?year=${ys}&month=${ms}`),
     api('GET', '/api/categories'),
     api('GET', '/api/goals'),
     api('GET', `/api/bills?year=${ys}&month=${ms}`),
     api('GET', '/api/members'),
     api('GET', '/api/bills?recurring=1'),
+    api('GET', '/api/bills'),
+    viewingRealMonth ? Promise.resolve(null) : api('GET', `/api/transactions?year=${rny}&month=${rnm}`),
   ]);
   state.transactions = txs;
   state.categories = cats;
@@ -326,6 +390,10 @@ async function loadAll() {
   state.bills = bills;
   state.members = members;
   state.recurringBills = recurringBills;
+  state.allBills = allBills;
+  // Real transactions of today's actual month — used by the dashboard "Previsão" panel so its
+  // first card always reflects real data, regardless of which month the user is browsing.
+  state.currentMonthTx = viewingRealMonth ? txs : currentMonthTx;
 }
 
 function updateMonthLabel() {
@@ -355,14 +423,25 @@ function goToMonth(y, m) {
 }
 
 // ─── TABS ─────────────────────────────────────────────────────
+const TAB_TITLES = {
+  dashboard: '📊 Dashboard', agenda: '📅 Agenda', fixosvar: '📌 Fixos x Variáveis',
+  transacoes: '💳 Transações', familia: '👥 Família', metas: '🎯 Metas', categorias: '🏷️ Categorias',
+};
+
 function setTab(tab) {
   activeTab = tab;
   ['dashboard','agenda','fixosvar','transacoes','familia','metas','categorias'].forEach(t => {
     document.getElementById('view-'+t).classList.toggle('hidden', t !== tab);
     document.getElementById('tab-'+t).classList.toggle('active', t === tab);
   });
+  document.getElementById('page-title').textContent = TAB_TITLES[tab] || '';
+  closeSidebar();
   renderTab(tab);
 }
+
+// ─── SIDEBAR (mobile drawer) ────────────────────────────────────
+function toggleSidebar() { document.body.classList.toggle('sidebar-open'); }
+function closeSidebar() { document.body.classList.remove('sidebar-open'); }
 
 function render() { renderTab(activeTab); }
 
@@ -399,6 +478,7 @@ function renderDashboard() {
   const projectedBalance = balance + toReceive - toPay;
 
   const insights = generateInsights(txs);
+  dashInsights = insights;
 
   const el = document.getElementById('view-dashboard');
   el.innerHTML = `
@@ -438,7 +518,7 @@ function renderDashboard() {
       <div class="card p-4">
         <h3 class="font-semibold text-white mb-3">💡 Insights</h3>
         <div id="insights-box">
-          ${insights.length ? insights.map(i=>`<div class="insight insight-${i.level}">${escH(i.text)}</div>`).join('') : '<p class="text-slate-400 text-sm">Sem insights ainda. Adicione transações para começar.</p>'}
+          ${insights.length ? insights.map((i,idx)=>`<div class="insight insight-${i.level}${i.action?' cursor-pointer hover:opacity-80':''}" ${i.action?`onclick="triggerInsight(${idx})"`:''}>${escH(i.text)}</div>`).join('') : '<p class="text-slate-400 text-sm">Sem insights ainda. Adicione transações para começar.</p>'}
         </div>
       </div>
     </div>
@@ -458,11 +538,14 @@ function renderDashboard() {
     <!-- Forecast -->
     <div class="card p-4 mb-4">
       <h3 class="font-semibold text-white mb-1">Previsão dos próximos meses</h3>
-      <p class="text-xs text-slate-500 mb-3">Baseado nas contas e receitas recorrentes já cadastradas na Agenda — não inclui lançamentos avulsos futuros.</p>
+      <p class="text-xs text-slate-500 mb-3">O mês atual mostra o saldo real (transações + contas pendentes) — bate com a aba Transações. Os meses seguintes são projeção a partir da Agenda.</p>
       <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        ${recurringForecast(3).map(f => `
+        ${monthsOutlook(3).map(f => `
           <div class="rounded-lg border border-slate-700/50 p-3">
-            <div class="text-xs text-slate-400 mb-2">${f.label.replace(/^\w/, c=>c.toUpperCase())}</div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs text-slate-400">${f.label.replace(/^\w/, c=>c.toUpperCase())}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded-full ${f.real ? 'bg-emerald-500/20 text-emerald-400' : 'bg-amber-500/20 text-amber-400'}">${f.real ? '✓ real' : '🔮 projeção'}</span>
+            </div>
             <div class="flex justify-between text-xs mb-1"><span class="text-red-400">Saídas</span><span class="text-red-400">${fmt(f.toPay)}</span></div>
             <div class="flex justify-between text-xs mb-2"><span class="text-emerald-400">Entradas</span><span class="text-emerald-400">${fmt(f.toReceive)}</span></div>
             <div class="flex justify-between text-sm font-semibold border-t border-slate-700/50 pt-2"><span class="text-slate-300">Saldo</span><span class="${f.saldo>=0?'text-emerald-400':'text-red-400'}">${fmt(f.saldo)}</span></div>
@@ -530,7 +613,7 @@ function renderCatLimits(byCategory) {
     const pct = c.limit > 0 ? Math.min((spent/c.limit)*100, 100) : 0;
     const over = spent > c.limit;
     const color = over ? '#ef4444' : pct > 80 ? '#f97316' : '#10b981';
-    return `<div class="mb-3">
+    return `<div class="mb-3${over?' cursor-pointer hover:opacity-80':''}" ${over?`onclick="txFilter='${escJs(c.name)}';setTab('transacoes')"`:''}>
       <div class="flex justify-between text-xs mb-1">
         <span style="color:${c.color}">${over?'🔴 ':''}${escH(c.name)}</span>
         <span class="${over?'text-red-400':'text-slate-400'}">${fmt(spent)} / ${fmt(c.limit)}</span>
@@ -572,8 +655,9 @@ function generateInsights(txs) {
   state.categories.forEach(cat => {
     if (!cat.limit) return;
     const spent = byCategory[cat.name] || 0;
-    if (spent > cat.limit) insights.push({ level:'error', text:`🚫 ${cat.name}: você ultrapassou o limite em ${fmt(spent - cat.limit)} (${fmt(spent)} de ${fmt(cat.limit)})` });
-    else if (isCurrentMonth && spent/cat.limit > 0.8 && monthProgress < 0.8) insights.push({ level:'warn', text:`⚠️ ${cat.name}: ${((spent/cat.limit)*100).toFixed(0)}% do limite usado com ${(monthProgress*100).toFixed(0)}% do mês — vá devagar!` });
+    const action = { tab:'transacoes', filter: cat.name };
+    if (spent > cat.limit) insights.push({ level:'error', action, text:`🚫 ${cat.name}: você ultrapassou o limite em ${fmt(spent - cat.limit)} (${fmt(spent)} de ${fmt(cat.limit)})` });
+    else if (isCurrentMonth && spent/cat.limit > 0.8 && monthProgress < 0.8) insights.push({ level:'warn', action, text:`⚠️ ${cat.name}: ${((spent/cat.limit)*100).toFixed(0)}% do limite usado com ${(monthProgress*100).toFixed(0)}% do mês — vá devagar!` });
   });
 
   // Savings rate
@@ -593,14 +677,14 @@ function generateInsights(txs) {
 
   // Pending bills
   const overdueBills = state.bills.filter(b=>b.status==='pending' && b.type==='bill' && b.dueDate < today_);
-  if (overdueBills.length) insights.push({ level:'error', text:`🔴 ${overdueBills.length} conta(s) vencida(s): ${overdueBills.map(b=>b.description).join(', ')}` });
+  if (overdueBills.length) insights.push({ level:'error', action:{tab:'agenda'}, text:`🔴 ${overdueBills.length} conta(s) vencida(s): ${overdueBills.map(b=>b.description).join(', ')}` });
 
   const upcomingBills = state.bills.filter(b=>{
     if (b.status!=='pending' || b.type!=='bill') return false;
     const diff = (parseDate(b.dueDate) - todayDate) / 86400000;
     return diff >= 0 && diff <= 5;
   });
-  if (upcomingBills.length && isCurrentMonth) insights.push({ level:'info', text:`📆 ${upcomingBills.length} conta(s) vencem nos próximos 5 dias: ${upcomingBills.map(b=>b.description).join(', ')}` });
+  if (upcomingBills.length && isCurrentMonth) insights.push({ level:'info', action:{tab:'agenda'}, text:`📆 ${upcomingBills.length} conta(s) vencem nos próximos 5 dias: ${upcomingBills.map(b=>b.description).join(', ')}` });
 
   // Month-end balance projection (actual so far + pending bills still due this month)
   if (isCurrentMonth) {
@@ -627,9 +711,13 @@ function addMonths(dateStr, n) {
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(Math.min(d,lastDay)).padStart(2,'0')}`;
 }
 
-// Rough month-by-month forecast (recurring items only, rolled forward from each
-// series' latest known occurrence) — used for the dashboard's "next months" outlook.
-function recurringForecast(n) {
+// Unified month-by-month outlook for the dashboard's "Previsão" panel.
+// The current real month uses actual data (transactions + pending bills of
+// that month) — the exact same formula as the "Saldo projetado" KPI — so it
+// always agrees with the Transações tab. Future months fall back to a
+// projection from recurring bill series, plus any one-off bill/receivable
+// already scheduled in the Agenda for that month.
+function monthsOutlook(n) {
   const latestBySeries = {};
   state.recurringBills.forEach(b => {
     const key = billSeriesKey(b);
@@ -641,15 +729,28 @@ function recurringForecast(n) {
     const d = new Date(now.getFullYear(), now.getMonth()+i, 1);
     const y = d.getFullYear(), m = d.getMonth()+1;
     const targetKey = `${y}-${String(m).padStart(2,'0')}`;
+    const isReal = i === 0;
     let toPay = 0, toReceive = 0;
-    Object.values(latestBySeries).forEach(base => {
-      let cursor = base.dueDate;
-      while (cursor.slice(0,7) < targetKey) cursor = addMonths(cursor, 1);
-      if (cursor.slice(0,7) === targetKey) {
-        if (base.type === 'bill') toPay += base.amount; else toReceive += base.amount;
-      }
-    });
-    months.push({ y, m, toPay, toReceive, saldo: toReceive - toPay, label: monthLabel(y, m) });
+
+    if (isReal) {
+      toPay += state.currentMonthTx.filter(t=>t.type==='expense').reduce((a,t)=>a+t.amount,0);
+      toReceive += state.currentMonthTx.filter(t=>t.type==='income').reduce((a,t)=>a+t.amount,0);
+      const pending = state.allBills.filter(b => b.status==='pending' && b.dueDate.slice(0,7)===targetKey);
+      toPay += pending.filter(b=>b.type==='bill').reduce((a,b)=>a+b.amount,0);
+      toReceive += pending.filter(b=>b.type==='receivable').reduce((a,b)=>a+b.amount,0);
+    } else {
+      Object.values(latestBySeries).forEach(base => {
+        let cursor = base.dueDate;
+        while (cursor.slice(0,7) < targetKey) cursor = addMonths(cursor, 1);
+        if (cursor.slice(0,7) === targetKey) {
+          if (base.type === 'bill') toPay += base.amount; else toReceive += base.amount;
+        }
+      });
+      state.allBills.filter(b => !b.isRecurring && b.dueDate.slice(0,7)===targetKey).forEach(b => {
+        if (b.type === 'bill') toPay += b.amount; else toReceive += b.amount;
+      });
+    }
+    months.push({ y, m, toPay, toReceive, saldo: toReceive - toPay, label: monthLabel(y, m), real: isReal });
   }
   return months;
 }
@@ -761,12 +862,8 @@ function renderAgenda() {
       <div id="agenda-history"><p class="text-slate-400 text-sm">Carregando...</p></div>
     </div>
   `;
-  loadAllBillsCache().then(() => { renderFutureList(); renderAgendaHistory(); });
-}
-
-async function loadAllBillsCache() {
-  try { state.allBills = await api('GET', '/api/bills'); }
-  catch (e) { state.allBills = []; }
+  renderFutureList();
+  renderAgendaHistory();
 }
 
 function futureHeader() {
