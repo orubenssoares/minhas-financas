@@ -866,13 +866,15 @@ function renderAgenda() {
   renderAgendaHistory();
 }
 
+let futureSearch = '';
 function futureHeader() {
-  return `<div class="flex items-center justify-between mb-3">
+  return `<div class="flex flex-wrap items-center justify-between gap-2 mb-3">
     <h3 class="font-semibold text-white">📋 Todos os lançamentos futuros</h3>
     <div class="flex gap-1">
       ${['all','bill','receivable'].map(f => `<button onclick="futureFilter='${f}';renderFutureList()" class="text-xs px-2 py-1 rounded-lg border ${futureFilter===f?'bg-blue-600 border-blue-600 text-white':'border-slate-700 text-slate-400 hover:border-slate-500'}">${f==='all'?'Todos':f==='bill'?'A pagar':'A receber'}</button>`).join('')}
     </div>
-  </div>`;
+  </div>
+  <input type="text" class="inp mb-3" placeholder="🔍 Buscar por descrição ou categoria..." value="${escH(futureSearch)}" oninput="futureSearch=this.value;renderFutureList()">`;
 }
 
 function renderFutureList() {
@@ -881,6 +883,10 @@ function renderFutureList() {
   const today_ = today();
   let items = state.allBills.filter(b => b.status === 'pending');
   if (futureFilter !== 'all') items = items.filter(b => b.type === futureFilter);
+  if (futureSearch) items = items.filter(b =>
+    b.description.toLowerCase().includes(futureSearch.toLowerCase()) ||
+    b.category.toLowerCase().includes(futureSearch.toLowerCase())
+  );
   items = [...items].sort((a,b) => a.dueDate.localeCompare(b.dueDate));
 
   if (!items.length) { box.innerHTML = futureHeader() + '<p class="text-slate-400 text-sm text-center py-4">Nenhum lançamento pendente</p>'; return; }
@@ -1002,7 +1008,7 @@ async function markBillDone(id) {
 }
 
 async function deleteBill(id) {
-  if (!confirm('Excluir este item?')) return;
+  if (!await askConfirm('Excluir este item?')) return;
   try {
     await api('DELETE', `/api/bills/${id}`);
     await loadAll(); render();
@@ -1111,6 +1117,7 @@ function renderTransacoes() {
   el.innerHTML = `
     <div class="flex flex-wrap items-center gap-3 mb-4">
       <h2 class="text-lg font-bold text-white flex-1">Transações</h2>
+      <button onclick="exportTransacoesCSV()" class="btn btn-ghost text-sm">📤 Exportar</button>
       <button onclick="openImportModal()" class="btn btn-ghost text-sm">📁 Importar</button>
       <button onclick="openTxModal('expense')" class="btn btn-danger text-sm">+ Despesa</button>
       <button onclick="openTxModal('income')" class="btn btn-success text-sm">+ Receita</button>
@@ -1140,12 +1147,44 @@ function renderTransacoes() {
 }
 
 async function deleteTx(id) {
-  if (!confirm('Excluir esta transação?')) return;
+  if (!await askConfirm('Excluir esta transação?')) return;
   try {
     await api('DELETE', `/api/transactions/${id}`);
     await loadAll(); render();
     showToast('Transação excluída', 'info');
   } catch(err) { showToast(err.message, 'error'); }
+}
+
+function csvEscape(v) {
+  const s = (v ?? '').toString();
+  return /[",\n;]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+
+function exportTransacoesCSV() {
+  const txs = txInMonth(curYear, curMonth);
+  const filtered = txFilter ? txs.filter(t =>
+    t.description.toLowerCase().includes(txFilter.toLowerCase()) ||
+    t.category.toLowerCase().includes(txFilter.toLowerCase())
+  ) : txs;
+  if (!filtered.length) { showToast('Nada para exportar neste mês', 'info'); return; }
+
+  const header = ['Data','Tipo','Descrição','Categoria','Valor','Fixo','Integrante'];
+  const rows = filtered.map(t => [
+    t.date, t.type === 'expense' ? 'Despesa' : 'Receita', t.description, t.category,
+    (+t.amount||0).toFixed(2).replace('.', ','), t.isFixed ? 'Sim' : 'Não', memberName(t.memberId) || '',
+  ]);
+  const csv = '﻿' + [header, ...rows].map(r => r.map(csvEscape).join(';')).join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `transacoes-${curYear}-${String(curMonth).padStart(2,'0')}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  showToast(`${filtered.length} transações exportadas`, 'success');
 }
 
 // ─── FAMÍLIA ──────────────────────────────────────────────────
@@ -1266,7 +1305,7 @@ function renderFamilia() {
 }
 
 async function deleteMember(id) {
-  if (!confirm('Excluir integrante? As transações relacionadas serão desvinculadas.')) return;
+  if (!await askConfirm('Excluir integrante? As transações relacionadas serão desvinculadas.')) return;
   try {
     await api('DELETE', `/api/members/${id}`);
     await loadAll(); render();
@@ -1317,7 +1356,7 @@ function renderMetas() {
 }
 
 async function deleteGoal(id) {
-  if (!confirm('Excluir esta meta?')) return;
+  if (!await askConfirm('Excluir esta meta?')) return;
   try {
     await api('DELETE', `/api/goals/${id}`);
     await loadAll(); render();
@@ -1366,7 +1405,12 @@ function renderCategorias() {
 }
 
 async function deleteCat(id) {
-  if (!confirm('Excluir categoria?')) return;
+  const cat = state.categories.find(c=>c.id===id);
+  const inUse = cat && txInMonth(curYear, curMonth).some(t => t.category === cat.name);
+  const msg = inUse
+    ? `Excluir "${cat.name}"? Transações que já usam essa categoria continuam existindo, mas ela some da lista de categorias (sem cor/limite configurados).`
+    : 'Excluir categoria?';
+  if (!await askConfirm(msg)) return;
   try {
     await api('DELETE', `/api/categories/${id}`);
     await loadAll(); render();
@@ -1379,7 +1423,35 @@ function openModal(html) {
   document.getElementById('modal-body').innerHTML = html;
   document.getElementById('modal').classList.remove('hidden');
 }
-function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+// Closing via the ✕/overlay while a confirm() prompt is open counts as "cancel",
+// so an awaited askConfirm() below never hangs forever.
+let confirmResolve = null;
+function closeModal() {
+  document.getElementById('modal').classList.add('hidden');
+  if (confirmResolve) { const r = confirmResolve; confirmResolve = null; r(false); }
+}
+
+// Replaces window.confirm() with a modal matching the app's own visual style.
+// Resolves true/false; never rejects.
+function askConfirm(message, confirmLabel = 'Excluir') {
+  return new Promise(resolve => {
+    confirmResolve = resolve;
+    openModal(`
+      <h3 class="font-bold text-white text-lg mb-3">Confirmar</h3>
+      <p class="text-slate-300 text-sm mb-5">${escH(message)}</p>
+      <div class="flex gap-2">
+        <button type="button" onclick="resolveConfirm(false)" class="btn btn-ghost flex-1">Cancelar</button>
+        <button type="button" onclick="resolveConfirm(true)" class="btn btn-danger flex-1">${escH(confirmLabel)}</button>
+      </div>
+    `);
+  });
+}
+function resolveConfirm(value) {
+  const r = confirmResolve;
+  confirmResolve = null; // consumed here so closeModal() below doesn't also resolve(false)
+  closeModal();
+  if (r) r(value);
+}
 
 function catOptions(selected='') {
   return state.categories.map(c => `<option value="${escH(c.name)}" ${c.name===selected?'selected':''}>${escH(c.name)}</option>`).join('');
@@ -1427,9 +1499,9 @@ function openTxModal(type, id) {
       </div>
       <div><label class="text-xs text-slate-400 block mb-1">Categoria</label><select id="tx-cat" class="inp">${catOptions(t.category)}</select></div>
       <div><label class="text-xs text-slate-400 block mb-1">Integrante</label><select id="tx-member" class="inp">${memberOptions(t.memberId||'')}</select></div>
-      <div class="flex gap-4">
+      <div>
         <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"><input type="checkbox" id="tx-fixed" ${t.isFixed?'checked':''}>Fixo</label>
-        <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"><input type="checkbox" id="tx-recur" ${t.isRecurring?'checked':''}>Recorrente</label>
+        <p class="text-xs text-slate-500 mt-1">Custo que se repete todo mês (aluguel, streaming...) — só para organizar os relatórios. Para uma cobrança que deve <strong>gerar automaticamente</strong> o lançamento do próximo mês, cadastre na Agenda como recorrente em vez de aqui.</p>
       </div>
       <div><label class="text-xs text-slate-400 block mb-1">Observações</label><textarea id="tx-notes" class="inp" rows="2">${escH(t.notes||'')}</textarea></div>
       <div class="flex gap-2 pt-2">
@@ -1458,12 +1530,16 @@ async function saveTx(e, type, id) {
         }
       }
     }
+    // isRecurring has no UI control here anymore (it never drove any logic on a
+    // transaction — only the Agenda's own recurring bills do); pass through the
+    // existing value untouched instead of silently clearing it on edit.
+    const existingTx = id ? state.transactions.find(t=>t.id===id) : null;
     const body = {
       type, description: document.getElementById('tx-desc').value,
       amount, category,
       date: document.getElementById('tx-date').value,
       isFixed: document.getElementById('tx-fixed').checked,
-      isRecurring: document.getElementById('tx-recur').checked,
+      isRecurring: existingTx?.isRecurring || false,
       notes: document.getElementById('tx-notes').value,
       memberId: document.getElementById('tx-member').value || null,
     };
