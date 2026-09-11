@@ -373,24 +373,26 @@ async function loadAll() {
   const n = new Date();
   const rny = n.getFullYear(), rnm = n.getMonth() + 1;
   const viewingRealMonth = ys === rny && ms === rnm;
+  const monthKey = `${ys}-${String(ms).padStart(2,'0')}`;
 
-  const [txs, cats, goals, bills, members, recurringBills, allBills, currentMonthTx] = await Promise.all([
+  // state.bills and state.recurringBills used to be separate requests, but they're
+  // both just filtered views of the one unfiltered /api/bills list — deriving them
+  // client-side instead cuts real round trips to the DB on every single load.
+  const [txs, cats, goals, members, allBills, currentMonthTx] = await Promise.all([
     api('GET', `/api/transactions?year=${ys}&month=${ms}`),
     api('GET', '/api/categories'),
     api('GET', '/api/goals'),
-    api('GET', `/api/bills?year=${ys}&month=${ms}`),
     api('GET', '/api/members'),
-    api('GET', '/api/bills?recurring=1'),
     api('GET', '/api/bills'),
     viewingRealMonth ? Promise.resolve(null) : api('GET', `/api/transactions?year=${rny}&month=${rnm}`),
   ]);
   state.transactions = txs;
   state.categories = cats;
   state.goals = goals;
-  state.bills = bills;
   state.members = members;
-  state.recurringBills = recurringBills;
   state.allBills = allBills;
+  state.bills = allBills.filter(b => b.dueDate.startsWith(monthKey));
+  state.recurringBills = allBills.filter(b => b.isRecurring);
   // Real transactions of today's actual month — used by the dashboard "Previsão" panel so its
   // first card always reflects real data, regardless of which month the user is browsing.
   state.currentMonthTx = viewingRealMonth ? txs : currentMonthTx;
@@ -1551,6 +1553,24 @@ async function saveTx(e, type, id) {
 }
 
 // ─── BILL MODAL ───────────────────────────────────────────────
+// "Categoria" (bill-cat) means two different things depending on the type: for a
+// conta a pagar it's a real budget category (drives limits/charts elsewhere), so it
+// stays a dropdown restricted to state.categories. For a receber there's no budget
+// to track — forcing the expense category list there was just confusing — so it
+// becomes a free-text field describing what the money is/where it's from.
+function billCategoryFieldHtml(type, value) {
+  if (type === 'receivable') {
+    return `<label class="text-xs text-slate-400 block mb-1">O que é / de onde vem</label>
+      <input id="bill-cat" class="inp" placeholder="Ex: salário, reembolso, aluguel recebido..." value="${escH(value||'')}" required>`;
+  }
+  return `<label class="text-xs text-slate-400 block mb-1">Categoria</label>
+    <select id="bill-cat" class="inp">${catOptions(value)}</select>`;
+}
+function toggleBillCategoryField() {
+  const type = document.getElementById('bill-type').value;
+  document.getElementById('bill-cat-wrap').innerHTML = billCategoryFieldHtml(type, '');
+}
+
 function openBillModal(id) {
   const bill = id ? (state.bills.find(b=>b.id===id) || state.allBills.find(b=>b.id===id)) : null;
   const b = bill || { type:'bill', description:'', amount:'', dueDate:today(), category:'', isRecurring:false, memberId:'' };
@@ -1558,7 +1578,7 @@ function openBillModal(id) {
     <h3 class="font-bold text-white text-lg mb-4">${bill?'Editar':'Novo'} item da agenda</h3>
     <form onsubmit="saveBill(event,'${id||''}')" class="space-y-3">
       <div><label class="text-xs text-slate-400 block mb-1">Tipo</label>
-        <select id="bill-type" class="inp">
+        <select id="bill-type" class="inp" onchange="toggleBillCategoryField()">
           <option value="bill" ${b.type==='bill'?'selected':''}>Conta a pagar</option>
           <option value="receivable" ${b.type==='receivable'?'selected':''}>A receber</option>
         </select>
@@ -1568,7 +1588,7 @@ function openBillModal(id) {
         <div><label class="text-xs text-slate-400 block mb-1">Valor (R$)</label><input id="bill-amt" type="number" step="0.01" min="0" class="inp" value="${b.amount||''}" required></div>
         <div><label class="text-xs text-slate-400 block mb-1">Vencimento</label><input id="bill-date" type="date" class="inp" value="${b.dueDate}" required></div>
       </div>
-      <div><label class="text-xs text-slate-400 block mb-1">Categoria</label><select id="bill-cat" class="inp">${catOptions(b.category)}</select></div>
+      <div id="bill-cat-wrap">${billCategoryFieldHtml(b.type, b.category)}</div>
       <div><label class="text-xs text-slate-400 block mb-1">Integrante</label><select id="bill-member" class="inp">${memberOptions(b.memberId||'')}</select></div>
       <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer"><input type="checkbox" id="bill-recur" ${b.isRecurring?'checked':''}>Recorrente (gera próximo mês ao pagar)</label>
       <div class="flex gap-2 pt-2">

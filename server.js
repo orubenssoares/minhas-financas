@@ -9,7 +9,18 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Database (Postgres / Neon) ────────────────────────────────
-const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
+// pg's default idleTimeoutMillis (10s) closes the connection between almost
+// every user click on a low-traffic app, forcing a fresh TCP+TLS+auth
+// handshake to Neon on the next request — that round trip is the dominant
+// cost behind "every action feels slow". Keeping connections open longer
+// avoids paying that cost repeatedly during a normal editing session.
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  max: 5,
+  idleTimeoutMillis: 60000,
+  keepAlive: true,
+});
 const query = async (text, params) => (await pool.query(text, params)).rows;
 const one = async (text, params) => (await query(text, params))[0] || null;
 
